@@ -9,7 +9,7 @@ use calculation/conversion.{
   convert_outputs, convert_proposals,
 }
 use calculation/shared.{
-  find_script_inputs, get_state_datum, proposal_prodecure_hash,
+  find_script_inputs, get_state_datum, proposal_procedure_hash,
 }
 use cardano/address.{Script}
 use cardano/assets.{AssetName, PolicyId}
@@ -201,7 +201,7 @@ pub fn deposit(own_policy_id: PolicyId, transaction: Transaction) -> Bool {
                       expect InlineDatum(output_data) = output.datum
                       expect output_datum: CosponsorDatum = output_data
                       expect Before { cosponsored } = output_datum
-                      let procedure_hash = proposal_prodecure_hash(cosponsored)
+                      let procedure_hash = proposal_procedure_hash(cosponsored)
                       procedure_hash == token_name
                     },
                   )
@@ -319,7 +319,7 @@ fn cosponsor_ada_map(
           let key =
             when output_datum is {
               Before { cosponsored } -> {
-                let procedure_hash = proposal_prodecure_hash(cosponsored)
+                let procedure_hash = proposal_procedure_hash(cosponsored)
                 if dict.has_key(expired_proposals, procedure_hash) {
                   procedure_hash
                 } else {

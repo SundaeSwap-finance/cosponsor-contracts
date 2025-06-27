@@ -17,8 +17,8 @@ validator cosponsor_state(
   spend(
     datum_option: Option<CosponsorStateDatum>,
     redeemer: CosponsorStateRedeemer,
-    transaction: Transaction,
     utxo: OutputReference,
+    transaction: Transaction,
   ) {
     expect Some(datum) = datum_option
     expect Some(state_input) = find_input(transaction.inputs, utxo)

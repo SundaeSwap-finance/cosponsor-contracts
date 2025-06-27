@@ -17,7 +17,7 @@ pub fn value_without_lovelace_preserved(
   )
 }
 
-pub fn proposal_prodecure_hash(
+pub fn proposal_procedure_hash(
   proposal_procedure: CosponsoredProposalProcedure,
 ) -> ByteArray {
   blake2b_256(serialise(proposal_procedure))

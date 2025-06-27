@@ -1,7 +1,7 @@
 use aiken/cbor.{serialise}
 use aiken/collection/list
 use aiken/merkle_patricia_forestry.{Proof, from_root, insert, root}
-use calculation/shared.{proposal_prodecure_hash}
+use calculation/shared.{proposal_procedure_hash}
 use cardano/governance.{ProposalProcedure}
 use types/cosponsor.{Anchor, CosponsoredProposalProcedure}
 
@@ -26,7 +26,7 @@ pub fn mpf_updated_correctly(
                 anchor,
               }
             let proposal_procedure_hash =
-              proposal_prodecure_hash(cosponsored_procedure)
+              proposal_procedure_hash(cosponsored_procedure)
             let updated_mpf =
               acc
                 |> insert(
