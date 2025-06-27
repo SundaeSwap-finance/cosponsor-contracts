@@ -16,20 +16,14 @@ use cardano/transaction.{
   ValidityRange,
 }
 use cosponsor_state as handlers
+use tests/shared.{
+  anchor_fuzzer, cosponsor_state_output_with_cpp, cosponsor_state_validator_hash,
+  proposal_lifetime, protocol_boot_utxo, scenario_proposal_procedure_baseline,
+  scenario_validity_range,
+} as tshared
 use types/cosponsor.{Anchor, CosponsoredProposalProcedure}
-use types/cosponsor_state.{CosponsorStateDatum, CosponsorStateRedeemer}
-use types/cosponsor_state as cosponsor_state_types
-
-const protocol_boot_utxo: OutputReference =
-  OutputReference {
-    transaction_id: #"00000000000000000000000000000000000000000000000000000000",
-    output_index: 0,
-  }
-
-const proposal_lifetime: Int = 1000
-
-const validator_hash: ScriptHash =
-  #"ffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+use types/cosponsor_state.{CosponsorStateDatum,
+  CosponsorStateRedeemer} as cosponsor_state_types
 
 test prop_cosponsor_state_mint_ok(ok via scenario.ok(default_state(Mint), step)) {
   run_as(ok)
@@ -58,7 +52,10 @@ test prop_cosponsor_state_spend_ko(
 }
 
 fn post_conditions(scenario: Transaction) {
-  let minted = scenario.mint |> assets.policies() |> list.has(validator_hash)
+  let minted =
+    scenario.mint
+      |> assets.policies()
+      |> list.has(cosponsor_state_validator_hash)
 
   []
     |> scenario.classify(@"· action = bootstrap", minted)
@@ -68,7 +65,7 @@ fn post_conditions(scenario: Transaction) {
 
 fn run_as(txs: List<Transaction>) {
   let default_handler =
-    fn(_sc: ScriptContext) { True }
+    handlers.cosponsor_state.else(protocol_boot_utxo, proposal_lifetime, _)
 
   let spend_handler =
     fn(
@@ -107,7 +104,7 @@ fn run_as(txs: List<Transaction>) {
 
   scenario.run(
     txs,
-    validator_hash,
+    cosponsor_state_validator_hash,
     mint_handler,
     spend_handler,
     scenario.into_withdraw_handler(default_handler),
@@ -142,7 +139,7 @@ fn step(st: State) -> Fuzzer<Scenario<State>> {
         fn() { scenario_inputs_missing_boot_utxo(st) },
       )
 
-    let (st, validity_range) <- fuzz.and_then(scenario_validity_range(st))
+    let validity_range <- fuzz.and_then(scenario_validity_range())
 
     expect Interval {
       upper_bound: IntervalBound {
@@ -157,8 +154,7 @@ fn step(st: State) -> Fuzzer<Scenario<State>> {
         when st.transaction_type is {
           Mint -> fuzz.both(constant(st), constant(None))
           Spend -> {
-            let (st, pp) <-
-              fuzz.and_then(scenario_proposal_procedure_baseline(st))
+            let pp <- fuzz.and_then(scenario_proposal_procedure_baseline())
             let anchor <- fuzz.and_then(anchor_fuzzer())
             let cpp = CosponsoredProposalProcedure { procedure: pp, anchor }
             fuzz.both(constant(st), constant(Some(cpp)))
@@ -217,42 +213,6 @@ fn step(st: State) -> Fuzzer<Scenario<State>> {
   }
 }
 
-fn scenario_proposal_procedure_baseline(
-  st: State,
-) -> Fuzzer<(State, ProposalProcedure)> {
-  let deposit <- fuzz.and_then(fuzz.int_at_least(0))
-  let return_address <- fuzz.and_then(cardano.credential())
-  let governance_action = GovernanceAction.NicePoll
-  let procedure =
-    ProposalProcedure { deposit, return_address, governance_action }
-  fuzz.both(constant(st), constant(procedure))
-}
-
-fn scenario_validity_range(st: State) -> Fuzzer<(State, ValidityRange)> {
-  let validity_lower <- fuzz.and_then(fuzz.int_at_least(0))
-  let validity_upper <- fuzz.and_then(fuzz.int_at_least(validity_lower))
-  fuzz.both(
-    constant(st),
-    constant(
-      Interval {
-        lower_bound: IntervalBound {
-          bound_type: Finite(validity_lower),
-          is_inclusive: True,
-        },
-        upper_bound: IntervalBound {
-          bound_type: Finite(validity_upper),
-          is_inclusive: True,
-        },
-      },
-    ),
-  )
-}
-
-fn anchor_fuzzer() -> Fuzzer<Anchor> {
-  fuzz.tuple(constant(@"http://dummy.url"), fuzz.bytearray())
-    |> fuzz.map(fn(pair) { Anchor { url: pair.1st, hash: pair.2nd } })
-}
-
 fn scenario_spend_redeemer_baseline(
   st: State,
   cpp: CosponsoredProposalProcedure,
@@ -273,7 +233,12 @@ fn scenario_redeemers_baseline(
         Mint ->
           fuzz.both(
             constant(st),
-            constant(Pair(ScriptPurpose.Mint(validator_hash), as_data(Void))),
+            constant(
+              Pair(
+                ScriptPurpose.Mint(cosponsor_state_validator_hash),
+                as_data(Void),
+              ),
+            ),
           )
         Spend -> {
           expect Some(cpp) = cpp
@@ -296,11 +261,11 @@ fn scenario_state_output_initial(st: State) -> Fuzzer<(State, Output)> {
   let output =
     Output {
       address: Address {
-        payment_credential: Script(validator_hash),
+        payment_credential: Script(cosponsor_state_validator_hash),
         stake_credential: None,
       },
       value: assets.from_asset(
-        validator_hash,
+        cosponsor_state_validator_hash,
         cosponsor_state_types.cosponsor_state_nft_name,
         1,
       ),
@@ -321,30 +286,7 @@ fn scenario_updated_state_output(
   cpp: CosponsoredProposalProcedure,
   validity_upper: Int,
 ) -> Fuzzer<(State, Output)> {
-  let updated_mpf_root =
-    merkle_patricia_forestry.empty
-      |> merkle_patricia_forestry.insert(
-          proposal_procedure_hash(cpp),
-          serialise(validity_upper + proposal_lifetime),
-          [],
-        )
-      |> merkle_patricia_forestry.root
-  let output =
-    Output {
-      address: Address {
-        payment_credential: Script(validator_hash),
-        stake_credential: None,
-      },
-      value: assets.from_asset(
-        validator_hash,
-        cosponsor_state_types.cosponsor_state_nft_name,
-        1,
-      ),
-      datum: InlineDatum(
-        CosponsorStateDatum { expired_proposals_mpf_root: updated_mpf_root },
-      ),
-      reference_script: None,
-    }
+  let output = cosponsor_state_output_with_cpp(cpp, validity_upper)
   fuzz.both(constant(st), constant(output))
 }
 
@@ -402,7 +344,7 @@ fn scenario_mints(st: State) -> Fuzzer<(State, Value)> {
         constant(st),
         constant(
           assets.from_asset(
-            validator_hash,
+            cosponsor_state_validator_hash,
             cosponsor_state_types.cosponsor_state_nft_name,
             1,
           ),

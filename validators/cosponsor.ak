@@ -4,6 +4,7 @@ use calculation/cosponsor.{
 } as cosponsor_calculation
 use cardano/address.{Address, Credential, Script}
 use cardano/assets.{PolicyId}
+use cardano/script_context.{ScriptContext}
 use cardano/transaction.{OutputReference, Transaction, find_input}
 use types/cosponsor.{
   CosponsorMintRedeemer, CosponsorWithdrawRedeemer, MDeposit, MRedeem,
@@ -72,7 +73,7 @@ validator cosponsor(
     }
   }
 
-  else(_) {
+  else(_: ScriptContext) {
     fail
   }
 }

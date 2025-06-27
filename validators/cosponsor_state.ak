@@ -3,6 +3,7 @@ use calculation/cosponsor_state.{mpf_updated_correctly} as cosponsor_state_calcu
 use calculation/shared.{final_validity, value_without_lovelace_preserved}
 use cardano/address.{Address, Script}
 use cardano/assets.{PolicyId}
+use cardano/script_context.{ScriptContext}
 use cardano/transaction.{
   InlineDatum, OutputReference, Transaction, find_input, find_script_outputs,
 }
@@ -82,7 +83,7 @@ validator cosponsor_state(
     }
   }
 
-  else(_) {
+  else(_: ScriptContext) {
     fail
   }
 }
