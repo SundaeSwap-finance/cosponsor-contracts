@@ -1,5 +1,7 @@
 name = "sundae/cosponsor"
 version = "0.0.0"
+compiler = "v1.1.17"
+plutus = "v3"
 license = "Apache-2.0"
 description = "Aiken contracts for project 'sundae/cosponsor'"
 
@@ -10,5 +12,17 @@ platform = "github"
 
 [[dependencies]]
 name = "aiken-lang/stdlib"
-version = "1.7.0"
+version = "v2.2.0"
 source = "github"
+
+[[dependencies]]
+name = "aiken-lang/merkle-patricia-forestry"
+version = "2.0.1"
+source = "github"
+
+[[dependencies]]
+name = "aiken-lang/fuzz"
+version = "main"
+source = "github"
+
+[config]
