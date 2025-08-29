@@ -1,19 +1,13 @@
-use aiken/cbor.{serialise}
 use aiken/collection/list
-use aiken/crypto.{ScriptHash}
 use aiken/fuzz.{constant}
 use aiken/fuzz/scenario.{Scenario}
 use aiken/interval.{Finite, Interval, IntervalBound}
-use aiken/merkle_patricia_forestry.{Leaf, Proof}
-use calculation/shared.{proposal_procedure_hash}
+use aiken/merkle_patricia_forestry
 use cardano/address.{Address, Script}
 use cardano/assets.{Value}
 use cardano/fuzz as cardano
-use cardano/governance.{GovernanceAction, ProposalProcedure}
-use cardano/script_context.{ScriptContext}
 use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, ScriptPurpose, Transaction,
-  ValidityRange,
 }
 use cosponsor_state as handlers
 use tests/shared.{
@@ -21,7 +15,7 @@ use tests/shared.{
   proposal_lifetime, protocol_boot_utxo, scenario_proposal_procedure_baseline,
   scenario_validity_range,
 } as tshared
-use types/cosponsor.{Anchor, CosponsoredProposalProcedure}
+use types/cosponsor.{CosponsoredProposalProcedure}
 use types/cosponsor_state.{CosponsorStateDatum,
   CosponsorStateRedeemer} as cosponsor_state_types
 
@@ -365,7 +359,7 @@ fn scenario_inputs_baseline(
         Mint ->
           cardano.input_with(constant(protocol_boot_utxo), cardano.output())
         Spend -> {
-          let (st, output) <- fuzz.and_then(scenario_state_output_initial(st))
+          let (_, output) <- fuzz.and_then(scenario_state_output_initial(st))
           cardano.input_with(cardano.output_reference(), constant(output))
         }
       },

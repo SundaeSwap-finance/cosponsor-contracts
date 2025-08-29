@@ -1,5 +1,4 @@
 use aiken/collection/list
-use aiken/crypto.{ScriptHash}
 use aiken/fuzz.{constant}
 use aiken/fuzz/scenario.{Scenario}
 use calculation/shared.{proposal_procedure_hash}
@@ -19,6 +18,9 @@ use types/cosponsor.{
   CosponsorDatum, CosponsorMintRedeemer, CosponsorRedeemer,
   CosponsorWithdrawRedeemer, CosponsoredProposalProcedure,
 }
+
+//TODO: Test redeeming with expired proposal tokens from another expired proposal utxo
+//TODO: Test redeeming before proposal expiration from an After utxo
 
 test prop_cosponsor_deposit_ok(ok via scenario.ok(default_state(Deposit), step)) {
   run_as(ok)
@@ -366,7 +368,7 @@ fn scenario_mints(
     Aggregate -> constant((st, assets.zero))
     Redeem -> {
       let token_name = proposal_procedure_hash(cpp)
-      let amount <- fuzz.and_then(fuzz.int_between(1, max_redeem))
+      let amount <- fuzz.and_then(fuzz.int_between(max_redeem, max_redeem))
       let mint =
         assets.from_asset(cosponsor_validator_hash, token_name, amount * -1)
       constant((st, mint))

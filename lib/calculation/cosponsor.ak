@@ -3,6 +3,7 @@ use aiken/collection/dict.{Dict}
 use aiken/collection/list
 use aiken/crypto
 use aiken/merkle_patricia_forestry.{Proof, from_root, has}
+use aiken/option
 use aiken/primitive/bytearray
 use calculation/conversion.{
   convert_extra_signatories, convert_fee, convert_inputs, convert_mint,
@@ -273,8 +274,17 @@ pub fn redeem(
           },
         )
 
+  let input_ada_dict = dict.union_with(input_ada_dict, burned_gada_dict, sum)
   let no_ada_leak =
-    dict.union_with(input_ada_dict, burned_gada_dict, sum) == output_ada_dict
+    input_ada_dict
+      |> dict.keys()
+      |> list.all(
+          fn(key) {
+            dict.get(input_ada_dict, key) == Some(
+              option.or_else(dict.get(output_ada_dict, key), 0),
+            )
+          },
+        )
 
   and {
     expired_proposals_present?,
