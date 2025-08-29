@@ -305,7 +305,7 @@ fn scenario_inputs(
           10,
         ),
       )
-    _ -> todo
+    _ -> fail @"Unsupported transaction type in scenario_inputs"
   }
 }
 
@@ -349,7 +349,7 @@ fn scenario_outputs(
       } else {
         constant((st, []))
       }
-    _ -> todo
+    _ -> fail @"Unsupported transaction type in scenario_outputs"
   }
 }
 
@@ -373,14 +373,14 @@ fn scenario_mints(
         assets.from_asset(cosponsor_validator_hash, token_name, amount * -1)
       constant((st, mint))
     }
-    _ -> todo
+    _ -> fail @"Unsupported transaction type in scenario_mints"
   }
 }
 
 fn scenario_mint_redeemer(st: State) -> Fuzzer<(State, CosponsorMintRedeemer)> {
   when st.transaction_type is {
     Deposit -> constant((st, CosponsorMintRedeemer.MDeposit))
-    _ -> todo
+    _ -> fail @"Unsupported transaction type in scenario_mint_redeemer"
   }
 }
 
@@ -452,6 +452,6 @@ fn scenario_redeemers_baseline(
           ),
         ),
       )
-    _ -> todo
+    _ -> fail @"Unsupported transaction type in scenario_redeemers_baseline"
   }
 }
