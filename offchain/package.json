@@ -1,0 +1,16 @@
+{
+  "name": "@sundaeswap/cosponsor",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@blaze-cardano/core": "^0.7.0",
+    "@blaze-cardano/data": "^0.6.4",
+    "@blaze-cardano/sdk": "^0.2.41"
+  }
+}
