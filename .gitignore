@@ -4,3 +4,31 @@ artifacts/
 build/
 # Aiken's default documentation export
 docs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+offchain/node_modules/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude AI
+.claude/
+
+# Build outputs
+offchain/dist/
+offchain/build/
+*.log
+
+# Deployment outputs (keep the example, ignore actual)
+deployed-contracts.json

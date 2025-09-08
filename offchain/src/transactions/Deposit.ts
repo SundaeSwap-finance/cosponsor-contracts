@@ -17,11 +17,11 @@ export interface IDepositArgs<P extends Provider, W extends Wallet> {
   depositAmount: bigint;
 }
 
-export async function deposit<P extends Provider, W extends Wallet>({
+export const deposit = async <P extends Provider, W extends Wallet>({
   blaze,
   cosponsoredProposal,
   depositAmount,
-}: IDepositArgs<P, W>): Promise<TxBuilder> {
+}: IDepositArgs<P, W>): Promise<TxBuilder> => {
   const tx = blaze.newTransaction();
 
   const cosponsorState = new CosponsorState(

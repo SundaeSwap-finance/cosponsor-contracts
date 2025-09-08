@@ -15,9 +15,9 @@ export interface INicePoll extends IGovernanceAction {
 
 export type TGovernanceAction = ITreasuryWithdrawal | INicePoll;
 
-export function ToContractType(
+export const ToContractType = (
   ga: TGovernanceAction,
-): CosponsorTypes.GovernanceAction {
+): CosponsorTypes.GovernanceAction => {
   switch (ga.kind) {
     case "TreasuryWithdrawal": {
       const tw = ga as ITreasuryWithdrawal;

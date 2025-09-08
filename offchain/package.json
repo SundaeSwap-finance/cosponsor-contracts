@@ -2,8 +2,15 @@
   "name": "@sundaeswap/cosponsor",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "deploy": "bun run src/scripts/deploy.ts",
+    "deposit": "bun run src/scripts/submitDeposit.ts",
+    "run": "bun run src/scripts/run.ts"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.1"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -11,6 +18,11 @@
   "dependencies": {
     "@blaze-cardano/core": "^0.7.0",
     "@blaze-cardano/data": "^0.6.4",
-    "@blaze-cardano/sdk": "^0.2.41"
+    "@blaze-cardano/ogmios": "^0.0.7",
+    "@blaze-cardano/sdk": "^0.2.43",
+    "@blaze-cardano/uplc": "^0.2.6",
+    "@scure/bip39": "^2.0.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.3"
   }
 }
