@@ -1,13 +1,14 @@
 import { CosponsorTypes } from "./GeneratedTypes/index.js";
 import { AlwaysTrue } from "./AlwaysTrue.js";
 import { PlutusV3Script } from "@blaze-cardano/core";
-import { TGovernanceAction } from "./Types/GovernanceAction.js";
+import { TGovernanceAction, ToContractType } from "./Types/GovernanceAction.js";
 import { TCredential } from "./Types/Credential.js";
 import { serialize } from "@blaze-cardano/data";
 import { Core } from "@blaze-cardano/sdk";
 import { PlutusData } from "@blaze-cardano/core";
 
-const default_state_nft_name = "cosponsor_state_nft";
+// Convert the NFT name to hex for ByteArray type
+const default_state_nft_name = Buffer.from("cosponsor_state_nft").toString("hex");
 
 export interface ICosponsoredProposal {
   deposit: bigint;
@@ -58,11 +59,12 @@ export class Cosponsor {
       instance.cosponsoredProposal = {
         procedure: {
           deposit: config.cosponsoredProposal.deposit,
-          governanceAction: CosponsorTypes.GovernanceAction.ToContractType(
+          governanceAction: ToContractType(
             config.cosponsoredProposal.action,
           ),
           returnAddress: {
             ScriptCredential: [instance.script().hash()],
+            ctor: 1n,
           },
         },
         anchor: {

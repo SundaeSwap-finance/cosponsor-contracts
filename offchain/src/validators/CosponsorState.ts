@@ -1,4 +1,5 @@
 import { PlutusV3Script } from "@blaze-cardano/core";
+import { Type } from "@blaze-cardano/data";
 import { CosponsorTypes } from "./GeneratedTypes";
 
 export class CosponsorState {
@@ -14,6 +15,7 @@ export class CosponsorState {
   }
 
   public script(): PlutusV3Script {
+    // Pass the OutputReference directly - it now matches the Type schema
     return new CosponsorTypes.CosponsorStateCosponsorStateMint(
       this.protocolBootUtxo,
       this.proposalLifetime,

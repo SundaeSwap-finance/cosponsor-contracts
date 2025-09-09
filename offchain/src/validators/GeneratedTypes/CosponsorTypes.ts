@@ -43,7 +43,7 @@ const Contracts = Type.Module({
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
           newParameters: Type.Object({
             ProtocolParametersUpdate: Type.Object({
-              inner: Type.Array(Type.Typle([Type.Bigint(), Type.Data()])),
+              inner: Type.Array(Type.Tuple([Type.BigInt(), TPlutusData])),
             }),
           }),
           guardrails: Type.Optional(Type.String()),
@@ -387,8 +387,8 @@ export class CosponsorStateCosponsorStateSpend {
         Type.Tuple([
           Type.Object(
             {
-              transactionId: Type.String(),
-              outputIndex: Type.BigInt(),
+              transaction_id: Type.String(),
+              output_index: Type.BigInt(),
             },
             { ctor: 0n },
           ),
@@ -409,8 +409,8 @@ export class CosponsorStateCosponsorStateMint {
         Type.Tuple([
           Type.Object(
             {
-              transactionId: Type.String(),
-              outputIndex: Type.BigInt(),
+              transaction_id: Type.String(),
+              output_index: Type.BigInt(),
             },
             { ctor: 0n },
           ),
@@ -431,8 +431,8 @@ export class CosponsorStateCosponsorStateElse {
         Type.Tuple([
           Type.Object(
             {
-              transactionId: Type.String(),
-              outputIndex: Type.BigInt(),
+              transaction_id: Type.String(),
+              output_index: Type.BigInt(),
             },
             { ctor: 0n },
           ),
