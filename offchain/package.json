@@ -3,6 +3,7 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
+    "configure": "bun run src/scripts/configure.ts",
     "deploy": "bun run src/scripts/deploy.ts",
     "deposit": "bun run src/scripts/deposit.ts",
     "run": "bun run src/scripts/run.ts"

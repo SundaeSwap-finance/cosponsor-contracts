@@ -11,15 +11,11 @@ dotenv.config()
 const mockProposal: ICosponsoredProposal = {
   deposit: 100_000_000n,
   anchor: {
-    url: "https://example.com/proposal.json",
+    url: Buffer.from("https://example.com/proposal.json").toString('hex'),
     hash: "0000000000000000000000000000000000000000000000000000000000000000",
   },
   action: {
-    type: "TreasuryWithdrawal",
-    withdrawals: new Map([
-      ["stake1u9r76vqdhvezwc7ypeheaantm3pd7v5s9jx7tgn68w78c6qnlqc3e", 1_000_000_000n],
-    ]),
-    guardrailsPolicy: null,
+    kind: "NicePoll",
   } as TGovernanceAction,
 }
 
@@ -37,7 +33,7 @@ export const submitDepositTransaction = async (
   console.log(`  Deposit: ${cosponsoredProposal.deposit} lovelace`)
   console.log(`  Anchor URL: ${cosponsoredProposal.anchor.url}`)
   console.log(`  Anchor Hash: ${cosponsoredProposal.anchor.hash}`)
-  console.log(`  Action Type: ${cosponsoredProposal.action.type}`)
+  console.log(`  Action Kind: ${cosponsoredProposal.action.kind}`)
   
   try {
     const blaze = cardanoProvider.getBlaze();

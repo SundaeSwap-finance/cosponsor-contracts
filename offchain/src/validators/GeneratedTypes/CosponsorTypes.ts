@@ -31,11 +31,11 @@ const Contracts = Type.Module({
   Rational: Type.Object({
     numerator: Type.BigInt(),
     denominator: Type.BigInt(),
-  }),
+  }, { ctor: 0n }),
   GovernanceActionId: Type.Object({
     transaction: Type.String(),
     proposalProcedure: Type.BigInt(),
-  }),
+  }, { ctor: 0n }),
   GovernanceAction: Type.Union([
     Type.Object(
       {
@@ -47,9 +47,8 @@ const Contracts = Type.Module({
             }),
           }),
           guardrails: Type.Optional(Type.String()),
-        }),
+        }, { ctor: 0n }),
       },
-      { ctor: 0n },
     ),
     Type.Object(
       {
@@ -60,10 +59,9 @@ const Contracts = Type.Module({
               major: Type.BigInt(),
               minor: Type.BigInt(),
             }),
-          }),
-        }),
+          }, { ctor: 0n }),
+        },  { ctor: 1n }),
       },
-      { ctor: 1n },
     ),
     Type.Object(
       {
@@ -72,17 +70,16 @@ const Contracts = Type.Module({
             Type.Tuple([Type.Ref("Credential"), Type.BigInt()]),
           ),
           guardrails: Type.Optional(Type.String()),
-        }),
+        }, { ctor: 2n }),
       },
-      { ctor: 2n },
     ),
     Type.Object(
       {
         NoConfidence: Type.Object({
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
-        }),
+        }, { ctor: 3n }),
       },
-      { ctor: 3n },
+
     ),
     Type.Object(
       {
@@ -93,9 +90,8 @@ const Contracts = Type.Module({
             Type.Tuple([Type.Ref("Credential"), Type.BigInt()]),
           ),
           quorum: Type.Ref("Rational"),
-        }),
+        }, { ctor: 4n }),
       },
-      { ctor: 4n },
     ),
     Type.Object(
       {
@@ -106,9 +102,9 @@ const Contracts = Type.Module({
               guardRails: Type.Optional(Type.String()),
             }),
           }),
-        }),
+        }, { ctor: 5n }),
       },
-      { ctor: 5n },
+
     ),
     Type.Literal("NicePoll", { ctor: 6n }),
   ]),
@@ -116,27 +112,25 @@ const Contracts = Type.Module({
     deposit: Type.BigInt(),
     returnAddress: Type.Ref("Credential"),
     governanceAction: Type.Ref("GovernanceAction"),
-  }),
+  }, { ctor: 0n }),
   CosponsoredProposalProcedure: Type.Object({
     procedure: Type.Ref("ProposalProcedure"),
     anchor: Type.Ref("Anchor"),
-  }),
+  }, { ctor: 0n }),
   CosponsorDatum: Type.Union([
     Type.Object(
       {
         Before: Type.Object({
           cosponsored: Type.Ref("CosponsoredProposalProcedure"),
-        }),
+        }, { ctor: 0n }),
       },
-      { ctor: 0n },
     ),
     Type.Literal("After", { ctor: 1n }),
   ]),
   CosponsorMintRedeemer: Type.Union([
     Type.Literal("MDeposit", { ctor: 0n }),
     Type.Object({
-      MRedeem: Type.Object(
-        {
+      MRedeem: Type.Object({
           proof: Type.Array(
             Type.Union([
               Type.Object({
