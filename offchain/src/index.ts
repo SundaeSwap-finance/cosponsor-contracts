@@ -1,5 +1,10 @@
-export * from "./Config.js";
+// Core SDK exports for cosponsor functionality
+export * from "./transactions/index.js";
+export * from "./utils/index.js";
 export * from "./validators/index.js";
-export * from "./validators/Types/index.js";
-export * from "./validators/GeneratedTypes/index.js";
-export * from "./transactions/Deposit.js";
+
+// Browser-specific exports
+export * from "./browser/index.js";
+
+// Re-export configuration
+export * from "./Config.js";

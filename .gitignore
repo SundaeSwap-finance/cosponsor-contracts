@@ -32,3 +32,6 @@ offchain/build/
 
 # Deployment outputs (keep the example, ignore actual)
 deployed-contracts.json
+
+# Local development examples (not for commit)
+offchain/src/scripts/deposit-treasurywithdrawal.ts

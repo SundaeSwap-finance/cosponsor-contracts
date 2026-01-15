@@ -1,9 +1,10 @@
-import { configs } from "@sundaeswap/eslint-config";
+export { configs as sundaeConfigs } from "@sundaeswap/eslint-config";
+
 import globals from "globals";
 
 /** @type {import("eslint").Linter.Config[]} */
 export default [
-  ...configs,
+  ...sundaeConfigs,
   {
     rules: {
       "no-console": "off",

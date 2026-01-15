@@ -1,4 +1,4 @@
-import { CosponsorTypes } from "./GeneratedTypes";
+import { CosponsorTypes } from "./GeneratedTypes/index.js";
 import { PlutusV3Script } from "@blaze-cardano/core";
 
 export class AlwaysTrue {

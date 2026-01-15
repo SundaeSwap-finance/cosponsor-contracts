@@ -28,18 +28,24 @@ const Contracts = Type.Module({
       ScriptCredential: Type.Tuple([Type.String()], { ctor: 1n }),
     }),
   ]),
-  Rational: Type.Object({
-    numerator: Type.BigInt(),
-    denominator: Type.BigInt(),
-  }, { ctor: 0n }),
-  GovernanceActionId: Type.Object({
-    transaction: Type.String(),
-    proposalProcedure: Type.BigInt(),
-  }, { ctor: 0n }),
+  Rational: Type.Object(
+    {
+      numerator: Type.BigInt(),
+      denominator: Type.BigInt(),
+    },
+    { ctor: 0n },
+  ),
+  GovernanceActionId: Type.Object(
+    {
+      transaction: Type.String(),
+      proposalProcedure: Type.BigInt(),
+    },
+    { ctor: 0n },
+  ),
   GovernanceAction: Type.Union([
-    Type.Object(
-      {
-        ProtocolParameters: Type.Object({
+    Type.Object({
+      ProtocolParameters: Type.Object(
+        {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
           newParameters: Type.Object({
             ProtocolParametersUpdate: Type.Object({
@@ -47,90 +53,105 @@ const Contracts = Type.Module({
             }),
           }),
           guardrails: Type.Optional(Type.String()),
-        }, { ctor: 0n }),
-      },
-    ),
-    Type.Object(
-      {
-        HardFork: Type.Object({
+        },
+        { ctor: 0n },
+      ),
+    }),
+    Type.Object({
+      HardFork: Type.Object(
+        {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
-          newVersion: Type.Object({
-            ProtocolVersion: Type.Object({
-              major: Type.BigInt(),
-              minor: Type.BigInt(),
-            }),
-          }, { ctor: 0n }),
-        },  { ctor: 1n }),
-      },
-    ),
-    Type.Object(
-      {
-        TreasuryWithdrawal: Type.Object({
+          newVersion: Type.Object(
+            {
+              ProtocolVersion: Type.Object({
+                major: Type.BigInt(),
+                minor: Type.BigInt(),
+              }),
+            },
+            { ctor: 0n },
+          ),
+        },
+        { ctor: 1n },
+      ),
+    }),
+    Type.Object({
+      TreasuryWithdrawal: Type.Object(
+        {
           beneficiaries: Type.Array(
             Type.Tuple([Type.Ref("Credential"), Type.BigInt()]),
           ),
           guardrails: Type.Optional(Type.String()),
-        }, { ctor: 2n }),
-      },
-    ),
-    Type.Object(
-      {
-        NoConfidence: Type.Object({
+        },
+        { ctor: 2n },
+      ),
+    }),
+    Type.Object({
+      NoConfidence: Type.Object(
+        {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
-        }, { ctor: 3n }),
-      },
-
-    ),
-    Type.Object(
-      {
-        ConsitutionalCommittee: Type.Object({
+        },
+        { ctor: 3n },
+      ),
+    }),
+    Type.Object({
+      ConstitutionalCommittee: Type.Object(
+        {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
           evictedMembers: Type.Array(Type.Ref("Credential")),
           addedMembers: Type.Array(
             Type.Tuple([Type.Ref("Credential"), Type.BigInt()]),
           ),
           quorum: Type.Ref("Rational"),
-        }, { ctor: 4n }),
-      },
-    ),
-    Type.Object(
-      {
-        NewConstitution: Type.Object({
+        },
+        { ctor: 4n },
+      ),
+    }),
+    Type.Object({
+      NewConstitution: Type.Object(
+        {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
           constitution: Type.Object({
             Constitution: Type.Object({
               guardRails: Type.Optional(Type.String()),
             }),
           }),
-        }, { ctor: 5n }),
-      },
-
-    ),
+        },
+        { ctor: 5n },
+      ),
+    }),
     Type.Literal("NicePoll", { ctor: 6n }),
   ]),
-  ProposalProcedure: Type.Object({
-    deposit: Type.BigInt(),
-    returnAddress: Type.Ref("Credential"),
-    governanceAction: Type.Ref("GovernanceAction"),
-  }, { ctor: 0n }),
-  CosponsoredProposalProcedure: Type.Object({
-    procedure: Type.Ref("ProposalProcedure"),
-    anchor: Type.Ref("Anchor"),
-  }, { ctor: 0n }),
+  ProposalProcedure: Type.Object(
+    {
+      deposit: Type.BigInt(),
+      returnAddress: Type.Ref("Credential"),
+      governanceAction: Type.Ref("GovernanceAction"),
+    },
+    { ctor: 0n },
+  ),
+  CosponsoredProposalProcedure: Type.Object(
+    {
+      procedure: Type.Ref("ProposalProcedure"),
+      anchor: Type.Ref("Anchor"),
+    },
+    { ctor: 0n },
+  ),
   CosponsorDatum: Type.Union([
-    Type.Object(
-      {
-        Before: Type.Object({
+    Type.Object({
+      Before: Type.Object(
+        {
           cosponsored: Type.Ref("CosponsoredProposalProcedure"),
-        }, { ctor: 0n }),
-      },
-    ),
+        },
+        { ctor: 0n },
+      ),
+    }),
     Type.Literal("After", { ctor: 1n }),
   ]),
   CosponsorMintRedeemer: Type.Union([
     Type.Literal("MDeposit", { ctor: 0n }),
     Type.Object({
-      MRedeem: Type.Object({
+      MRedeem: Type.Object(
+        {
           proof: Type.Array(
             Type.Union([
               Type.Object({

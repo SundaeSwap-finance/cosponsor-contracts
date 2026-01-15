@@ -1,6 +1,7 @@
 import { PlutusV3Script } from "@blaze-cardano/core";
 import { Type } from "@blaze-cardano/data";
-import { CosponsorTypes } from "./GeneratedTypes";
+import { CosponsorTypes } from "./GeneratedTypes/index.js";
+import { Core } from "@blaze-cardano/sdk";
 
 export class CosponsorState {
   protocolBootUtxo: CosponsorTypes.OutputReference;
@@ -20,5 +21,15 @@ export class CosponsorState {
       this.protocolBootUtxo,
       this.proposalLifetime,
     ).Script.asPlutusV3()!;
+  }
+
+  public address(network: Core.NetworkId): Core.Address {
+    return Core.addressFromCredential(
+      network,
+      Core.Credential.fromCore({
+        hash: this.script().hash(),
+        type: Core.CredentialType.ScriptHash,
+      }),
+    );
   }
 }

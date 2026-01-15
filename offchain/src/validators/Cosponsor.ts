@@ -8,7 +8,9 @@ import { Core } from "@blaze-cardano/sdk";
 import { PlutusData } from "@blaze-cardano/core";
 
 // Convert the NFT name to hex for ByteArray type
-const default_state_nft_name = Buffer.from("cosponsor_state_nft").toString("hex");
+const default_state_nft_name = Buffer.from("cosponsor_state_nft").toString(
+  "hex",
+);
 
 export interface ICosponsoredProposal {
   deposit: bigint;
@@ -59,12 +61,9 @@ export class Cosponsor {
       instance.cosponsoredProposal = {
         procedure: {
           deposit: config.cosponsoredProposal.deposit,
-          governanceAction: ToContractType(
-            config.cosponsoredProposal.action,
-          ),
+          governanceAction: ToContractType(config.cosponsoredProposal.action),
           returnAddress: {
             ScriptCredential: [instance.script().hash()],
-            ctor: 1n,
           },
         },
         anchor: {
