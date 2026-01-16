@@ -1,6 +1,8 @@
 /* eslint-disable no-console */
 import { Core } from "@blaze-cardano/sdk";
+import { parse, serialize } from "@blaze-cardano/data";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
+import { CosponsorTypes } from "../validators/GeneratedTypes/index.js";
 
 /**
  * Map governance action constructor index to kind string
@@ -31,6 +33,22 @@ class CborReader {
     this.pos = 0;
   }
 
+  /**
+   * Get current position in the byte array
+   */
+  getPosition(): number {
+    return this.pos;
+  }
+
+  /**
+   * Extract bytes from start to end position as hex string
+   */
+  extractHex(start: number, end: number): string {
+    return Array.from(this.data.slice(start, end))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
   private readByte(): number {
     return this.data[this.pos++];
   }
@@ -57,7 +75,28 @@ class CborReader {
         this.readByte()
       );
     }
+    if (additionalInfo === 31) {
+      // Indefinite length - return -1 as sentinel
+      return -1;
+    }
     throw new Error(`Unsupported additional info: ${additionalInfo}`);
+  }
+
+  /**
+   * Check if next byte is the CBOR break code (0xff)
+   */
+  isBreak(): boolean {
+    return this.peekByte() === 0xff;
+  }
+
+  /**
+   * Consume the break byte (0xff) for indefinite-length structures
+   */
+  readBreak(): void {
+    const byte = this.readByte();
+    if (byte !== 0xff) {
+      throw new Error(`Expected break (0xff), got ${byte.toString(16)}`);
+    }
   }
 
   /**
@@ -104,22 +143,42 @@ class CborReader {
       case 3: {
         // Text string
         const len = this.readUint(additionalInfo);
-        this.pos += len;
+        if (len >= 0) {
+          this.pos += len;
+        }
+        // Note: indefinite-length strings not supported yet
         break;
       }
       case 4: {
         // Array
         const arrLen = this.readUint(additionalInfo);
-        for (let i = 0; i < arrLen; i++) {
-          this.skipValue();
+        if (arrLen === -1) {
+          // Indefinite-length array - read until break
+          while (!this.isBreak()) {
+            this.skipValue();
+          }
+          this.readBreak();
+        } else {
+          for (let i = 0; i < arrLen; i++) {
+            this.skipValue();
+          }
         }
         break;
       }
       case 5: {
         // Map
         const mapLen = this.readUint(additionalInfo);
-        for (let i = 0; i < mapLen * 2; i++) {
-          this.skipValue();
+        if (mapLen === -1) {
+          // Indefinite-length map - read until break
+          while (!this.isBreak()) {
+            this.skipValue(); // key
+            this.skipValue(); // value
+          }
+          this.readBreak();
+        } else {
+          for (let i = 0; i < mapLen * 2; i++) {
+            this.skipValue();
+          }
         }
         break;
       }
@@ -127,7 +186,7 @@ class CborReader {
         this.readUint(additionalInfo);
         this.skipValue();
         break;
-      case 7: // Simple/float
+      case 7: // Simple/float/break
         if (additionalInfo < 24) {
           break;
         }
@@ -147,6 +206,7 @@ class CborReader {
           this.pos += 8;
           break;
         }
+        // additionalInfo === 31 is break, handled elsewhere
         break;
     }
   }
@@ -188,18 +248,24 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
   try {
     const reader = new CborReader(cborHex);
 
-    // CosponsorDatum - should be tag 121 (constructor 0 = Before)
+    // CosponsorDatum - tag 121 = Before (has data), tag 122 = After (no data)
     const datumTag = reader.readTag();
     console.log("🔍 CBOR Parse: datumTag =", datumTag);
+    if (datumTag === 122) {
+      // CosponsorDatum::After - deposit has been processed, no proposal data
+      console.log("🔍 CBOR Parse: Datum is After (processed), no action data");
+      return "Processed";
+    }
     if (datumTag !== 121) {
-      console.log("🔍 CBOR Parse: Expected tag 121, got", datumTag);
+      console.log("🔍 CBOR Parse: Expected tag 121 or 122, got", datumTag);
       return "Unknown";
     } // Not CosponsorDatum::Before
 
     // Array with 1 element (CosponsoredProposalProcedure)
+    // -1 means indefinite-length array, which is valid
     const datumLen = reader.readArrayLength();
     console.log("🔍 CBOR Parse: datumLen =", datumLen);
-    if (datumLen < 1) {
+    if (datumLen === 0) {
       return "Unknown";
     }
 
@@ -211,20 +277,25 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
     }
 
     // Array with 2 elements [ProposalProcedure, Anchor]
+    // -1 means indefinite-length array, which is valid
     const cppLen = reader.readArrayLength();
-    if (cppLen < 2) {
+    console.log("🔍 CBOR Parse: cppLen =", cppLen);
+    if (cppLen === 0) {
       return "Unknown";
     }
 
     // ProposalProcedure - should be tag 121 (constructor 0)
     const ppTag = reader.readTag();
+    console.log("🔍 CBOR Parse: ppTag =", ppTag);
     if (ppTag !== 121) {
       return "Unknown";
     }
 
     // Array with 3 elements [deposit, returnAddress, governanceAction]
+    // -1 means indefinite-length array, which is valid
     const ppLen = reader.readArrayLength();
-    if (ppLen < 3) {
+    console.log("🔍 CBOR Parse: ppLen =", ppLen);
+    if (ppLen === 0) {
       return "Unknown";
     }
 
@@ -236,12 +307,16 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
 
     // governanceAction - tag 121-127 indicates constructor 0-6
     const actionTag = reader.readTag();
+    console.log("🔍 CBOR Parse: actionTag =", actionTag);
     if (actionTag === null || actionTag < 121 || actionTag > 127) {
       return "Unknown";
     }
 
     const actionIndex = actionTag - 121;
-    return GOVERNANCE_ACTION_KINDS[actionIndex] || `Unknown (${actionIndex})`;
+    const actionKind =
+      GOVERNANCE_ACTION_KINDS[actionIndex] || `Unknown (${actionIndex})`;
+    console.log("🔍 CBOR Parse: SUCCESS! actionKind =", actionKind);
+    return actionKind;
   } catch (error) {
     console.warn("Failed to parse governance action from CBOR:", error);
     return "Unknown";
@@ -261,6 +336,7 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
       return { url: "", hash: "" };
     }
 
+    // -1 means indefinite-length array, which is valid
     reader.readArrayLength();
 
     const cppTag = reader.readTag();
@@ -268,8 +344,9 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
       return { url: "", hash: "" };
     }
 
+    // -1 means indefinite-length array, which is valid
     const cppLen = reader.readArrayLength();
-    if (cppLen < 2) {
+    if (cppLen === 0) {
       return { url: "", hash: "" };
     }
 
@@ -282,8 +359,9 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
       return { url: "", hash: "" };
     }
 
+    // -1 means indefinite-length array, which is valid
     const anchorLen = reader.readArrayLength();
-    if (anchorLen < 2) {
+    if (anchorLen === 0) {
       return { url: "", hash: "" };
     }
 
@@ -295,6 +373,143 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
     return { url, hash };
   } catch (error) {
     console.warn("Failed to parse anchor from CBOR:", error);
+    return { url: "", hash: "" };
+  }
+};
+
+/**
+ * Compute the proposal hash from a PlutusData datum
+ * Uses the same serialize() function as when tokens are minted to ensure matching hashes
+ *
+ * The gADA token asset name is computed as:
+ *   serialize(CosponsorTypes.CosponsoredProposalProcedure, proposal).hash()
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const computeProposalHashFromDatum = (datumPlutusData: any): string => {
+  try {
+    // Parse the datum using the same schema used when creating it
+    const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+
+    if (!parsedDatum) {
+      console.log("🔍 parse() returned null/undefined for datum");
+      return "";
+    }
+
+    // Check for "After" datum first
+    if (parsedDatum === "After") {
+      console.log("🔍 Datum is After (processed proposal)");
+      return "";
+    }
+
+    if (typeof parsedDatum !== "object") {
+      console.log("🔍 parsedDatum is not an object:", typeof parsedDatum);
+      return "";
+    }
+
+    // Check if it's a "Before" datum with cosponsored proposal
+    if (
+      "Before" in parsedDatum &&
+      parsedDatum.Before &&
+      "cosponsored" in parsedDatum.Before
+    ) {
+      const cosponsoredProposal = parsedDatum.Before.cosponsored;
+
+      // Re-serialize using the same function that was used during minting
+      // This ensures the CBOR encoding is identical
+      const serialized = serialize(
+        CosponsorTypes.CosponsoredProposalProcedure,
+        cosponsoredProposal,
+      );
+
+      const proposalHash = serialized.hash();
+      return proposalHash;
+    }
+
+    console.log(
+      "🔍 Datum structure unexpected, keys:",
+      Object.keys(parsedDatum),
+    );
+    return "";
+  } catch (error) {
+    console.warn("Failed to compute proposal hash from datum:", error);
+    return "";
+  }
+};
+
+/**
+ * Extract governance action kind from parsed datum
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const extractActionKindFromDatum = (datumPlutusData: any): string => {
+  try {
+    const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+
+    if (!parsedDatum || typeof parsedDatum !== "object") {
+      return "Unknown";
+    }
+
+    if (
+      "Before" in parsedDatum &&
+      parsedDatum.Before &&
+      "cosponsored" in parsedDatum.Before
+    ) {
+      const govAction =
+        parsedDatum.Before.cosponsored.procedure?.governanceAction;
+      if (!govAction) return "Unknown";
+
+      // The governance action is a union type - extract the kind from the object key
+      if (typeof govAction === "string") {
+        return govAction; // e.g., "NicePoll"
+      }
+      if (typeof govAction === "object") {
+        const keys = Object.keys(govAction);
+        if (keys.length > 0) {
+          return keys[0]; // e.g., "TreasuryWithdrawal", "HardFork", etc.
+        }
+      }
+      return "Unknown";
+    }
+
+    if (parsedDatum === "After") {
+      return "Processed";
+    }
+
+    return "Unknown";
+  } catch (error) {
+    console.warn("Failed to extract action kind from datum:", error);
+    return "Unknown";
+  }
+};
+
+/**
+ * Extract anchor from parsed datum
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const extractAnchorFromDatum = (
+  datumPlutusData: any,
+): { url: string; hash: string } => {
+  try {
+    const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+
+    if (!parsedDatum || typeof parsedDatum !== "object") {
+      return { url: "", hash: "" };
+    }
+
+    if (
+      "Before" in parsedDatum &&
+      parsedDatum.Before &&
+      "cosponsored" in parsedDatum.Before
+    ) {
+      const anchor = parsedDatum.Before.cosponsored.anchor;
+      return {
+        url: anchor?.url || "",
+        hash: anchor?.hash || "",
+      };
+    }
+
+    return { url: "", hash: "" };
+  } catch (error) {
+    console.warn("Failed to extract anchor from datum:", error);
     return { url: "", hash: "" };
   }
 };
@@ -320,6 +535,8 @@ export interface IScriptUtxo {
   actionKind: string;
   /** Parsed anchor from the datum */
   anchor: { url: string; hash: string };
+  /** Computed blake2b-256 hash of ProposalProcedure - matches gADA token asset name */
+  proposalHash: string;
 }
 
 export interface IWithdrawalPlan {
@@ -400,66 +617,53 @@ export const fetchWithdrawalPlan = async (
   console.log("Fetching script UTxOs...");
   console.log(`Script address: ${cosponsorScriptAddress.toBech32()}`);
 
-  const rawScriptUtxos =
+  // Get UTxOs from provider
+  let rawScriptUtxos =
     await blaze.provider.getUnspentOutputs(cosponsorScriptAddress);
+
+  // Apply pending transaction tracking (for tx chaining)
+  const { pendingUtxoTracker } = await import("./utxoTracker.js");
+  const stats = pendingUtxoTracker.getStats();
+  if (stats.spentCount > 0 || stats.pendingCount > 0) {
+    console.log(`🔄 Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`);
+    rawScriptUtxos = pendingUtxoTracker.applyToUtxoList(rawScriptUtxos);
+  }
 
   const scriptUtxos: IScriptUtxo[] = rawScriptUtxos.map(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (utxo: any) => {
-      // Parse datum to get action kind and anchor
+      // Parse datum to get action kind, anchor, and proposal hash
       let actionKind = "Unknown";
       let anchor = { url: "", hash: "" };
+      let proposalHash = "";
 
       try {
         const output = utxo.output();
         const datum = output.datum();
 
-        console.log(
-          "🔍 DEBUG datum:",
-          datum,
-          "type:",
-          datum?.constructor?.name,
-        );
-
         if (datum) {
           // Get the inline datum (PlutusData)
-          const inlineDatum = datum.asInlineData?.();
-          console.log(
-            "🔍 DEBUG inlineDatum:",
-            inlineDatum,
-            "type:",
-            inlineDatum?.constructor?.name,
-          );
+          const inlineDatum = datum.asInlineData?.() || datum;
 
-          if (inlineDatum) {
-            // Get CBOR hex and parse it directly
-            // This avoids API mismatch issues with Blaze's runtime PlutusData objects
-            const cborHex = inlineDatum.toCbor?.();
+          // Use the typed parsing functions that use the same serialize logic as minting
+          actionKind = extractActionKindFromDatum(inlineDatum);
+          anchor = extractAnchorFromDatum(inlineDatum);
+          proposalHash = computeProposalHashFromDatum(inlineDatum);
+
+          const txId = utxo.input().transactionId().slice(0, 8);
+          if (proposalHash) {
             console.log(
-              "🔍 DEBUG cborHex:",
-              cborHex?.substring(0, 100),
-              "...",
+              `🔍 UTxO ${txId}...: ✓ actionKind=${actionKind}, hash=${proposalHash.slice(0, 16)}...`,
             );
-
-            if (cborHex) {
-              actionKind = parseGovernanceActionKindFromCbor(cborHex);
-              anchor = parseAnchorFromCbor(cborHex);
-              console.log("🔍 DEBUG parsed actionKind:", actionKind);
-            }
           } else {
-            // Maybe datum is already PlutusData? Try toCbor directly
-            const directCbor = datum.toCbor?.();
             console.log(
-              "🔍 DEBUG directCbor:",
-              directCbor?.substring(0, 100),
-              "...",
+              `🔍 UTxO ${txId}...: ✗ No hash (actionKind=${actionKind})`,
             );
-            if (directCbor) {
-              actionKind = parseGovernanceActionKindFromCbor(directCbor);
-              anchor = parseAnchorFromCbor(directCbor);
-              console.log("🔍 DEBUG parsed actionKind (direct):", actionKind);
-            }
           }
+        } else {
+          console.log(
+            `🔍 UTxO ${utxo.input().transactionId().slice(0, 8)}...: ✗ No datum`,
+          );
         }
       } catch (error) {
         console.warn("Failed to parse UTxO datum:", error);
@@ -472,6 +676,7 @@ export const fetchWithdrawalPlan = async (
         utxo,
         actionKind,
         anchor,
+        proposalHash,
       };
     },
   );
@@ -546,42 +751,93 @@ export const fetchUserDeposits = async (
 ): Promise<IUserDeposit[]> => {
   const plan = await fetchWithdrawalPlan(blaze);
 
+  // Create a map from proposal hash to script UTxO for fast lookup
+  // The gADA token asset name IS the blake2b-256 hash of ProposalProcedure
+  const utxoByProposalHash = new Map<string, IScriptUtxo>();
+  for (const utxo of plan.scriptUtxos) {
+    if (utxo.proposalHash) {
+      // Store UTxO by its computed proposal hash
+      utxoByProposalHash.set(utxo.proposalHash, utxo);
+      console.log(
+        `  UTxO ${utxo.txHash.slice(0, 8)}... hash ${utxo.proposalHash.slice(0, 16)}... action: ${utxo.actionKind}`,
+      );
+    }
+  }
+
+  console.log(
+    `Created proposal hash map with ${utxoByProposalHash.size} entries`,
+  );
+
+  // Debug: Show all computed hashes
+  console.log("Available proposal hashes in map:");
+  for (const [hash, utxo] of utxoByProposalHash.entries()) {
+    console.log(`  ${hash} -> ${utxo.actionKind}`);
+  }
+
   // Convert to legacy format - create one "deposit" per token type
-  // The actual script UTxO selection happens at withdrawal time
   const deposits: IUserDeposit[] = [];
 
+  console.log("\nUser tokens to match:");
   for (const token of plan.userTokens) {
-    // Find script UTxOs to cover this token's amount
-    const { selected } = selectUtxosForWithdrawal(
-      plan.scriptUtxos,
-      token.tokenAmount,
-    );
+    console.log(`  Token asset name: ${token.tokenAssetName}`);
+  }
 
-    if (selected.length > 0) {
-      // Use the first selected UTxO's info for the deposit record
-      const firstUtxo = selected[0];
-      // The token asset name IS the blake2b hash of the proposal procedure
-      // This uniquely identifies the proposal across the system
+  for (const token of plan.userTokens) {
+    // Look up the matching UTxO by token asset name (which IS the proposal hash)
+    const matchedUtxo = utxoByProposalHash.get(token.tokenAssetName);
+
+    if (matchedUtxo) {
+      // Found exact match by proposal hash
+      console.log(
+        `  ✓ Token ${token.tokenAssetName.slice(0, 16)}... matched to ${matchedUtxo.actionKind}`,
+      );
+
       deposits.push({
         tokenAssetName: token.tokenAssetName,
         tokenAmount: token.tokenAmount,
-        depositTxHash: firstUtxo.txHash,
-        depositOutputIndex: firstUtxo.outputIndex,
-        depositAmount: token.tokenAmount, // Amount is based on tokens, not UTxO
+        depositTxHash: matchedUtxo.txHash,
+        depositOutputIndex: matchedUtxo.outputIndex,
+        depositAmount: token.tokenAmount,
         cosponsoredProposal: {
           deposit: token.tokenAmount,
-          anchor: firstUtxo.anchor, // Use parsed anchor from datum
-          action: { kind: firstUtxo.actionKind }, // Use parsed action kind from datum
+          anchor: matchedUtxo.anchor,
+          action: { kind: matchedUtxo.actionKind },
         },
-        proposalUrl: firstUtxo.anchor.url
-          ? Buffer.from(firstUtxo.anchor.url, "hex").toString()
+        proposalUrl: matchedUtxo.anchor.url
+          ? Buffer.from(matchedUtxo.anchor.url, "hex").toString()
           : "On-chain proposal",
-        proposalHash: token.tokenAssetName, // Token asset name = proposal hash
+        proposalHash: token.tokenAssetName,
       });
-
+    } else {
+      // No match found - fall back to selecting UTxOs by amount
       console.log(
-        `  Token ${token.tokenAssetName.slice(0, 16)}... -> Action: ${firstUtxo.actionKind}`,
+        `  ✗ Token ${token.tokenAssetName.slice(0, 16)}... no hash match, using fallback`,
       );
+
+      const { selected } = selectUtxosForWithdrawal(
+        plan.scriptUtxos,
+        token.tokenAmount,
+      );
+
+      if (selected.length > 0) {
+        const firstUtxo = selected[0];
+        deposits.push({
+          tokenAssetName: token.tokenAssetName,
+          tokenAmount: token.tokenAmount,
+          depositTxHash: firstUtxo.txHash,
+          depositOutputIndex: firstUtxo.outputIndex,
+          depositAmount: token.tokenAmount,
+          cosponsoredProposal: {
+            deposit: token.tokenAmount,
+            anchor: firstUtxo.anchor,
+            action: { kind: firstUtxo.actionKind },
+          },
+          proposalUrl: firstUtxo.anchor.url
+            ? Buffer.from(firstUtxo.anchor.url, "hex").toString()
+            : "On-chain proposal",
+          proposalHash: token.tokenAssetName,
+        });
+      }
     }
   }
 

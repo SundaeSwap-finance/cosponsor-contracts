@@ -40,3 +40,9 @@ export {
   isValidCardanoAddress,
   getPaymentCredentialHash,
 } from "./addressUtils.js";
+
+// UTxO tracking for transaction chaining
+export {
+  pendingUtxoTracker,
+  extractTransactionEffects,
+} from "./utxoTracker.js";

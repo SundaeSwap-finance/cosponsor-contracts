@@ -270,13 +270,31 @@ export const browserWithdraw = async ({
   }
 
   // Handle change if we selected more ADA than we're withdrawing
-  // The excess stays at the script address (sent back as change with datum)
+  // The excess MUST go back to the script address with the original datum
+  // to satisfy the no_ada_leak validator check
   const excessAda = totalSelected - withdrawAmount;
   if (excessAda > 0n) {
     console.log(
-      `💫 Excess ${excessAda / 1_000_000n} ADA will be handled as change`,
+      `💫 Returning ${excessAda / 1_000_000n} ADA back to script address`,
     );
-    // Note: The on-chain validator will handle this via output balancing
+
+    // Calculate cosponsor script address
+    const cosponsorScriptAddress = Core.addressFromCredential(
+      blaze.provider.network,
+      Core.Credential.fromCore({
+        hash: Core.Hash28ByteBase16(cosponsorHash),
+        type: Core.CredentialType.ScriptHash,
+      }),
+    );
+
+    // Get the datum from the first selected UTxO (they all have the same proposal key)
+    const firstUtxoDatum = selectedUtxos[0].utxo.output().datum();
+    if (!firstUtxoDatum) {
+      throw new Error("Selected UTxO has no datum - cannot create change output");
+    }
+
+    // Send excess back to script with original datum
+    tx = tx.lockAssets(cosponsorScriptAddress, makeValue(excessAda), firstUtxoDatum);
   }
 
   // Send withdrawn ADA to wallet
