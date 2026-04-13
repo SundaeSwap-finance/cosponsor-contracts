@@ -11,6 +11,7 @@ import {
   ConstrPlutusData,
   PlutusData,
 } from "@validators/Types/GovernanceAction.js";
+import { chunkCip25Text } from "./metadataUtils.js";
 
 /**
  * Browser-compatible deposit function
@@ -206,32 +207,14 @@ export const browserDeposit = async ({
       </svg>
     `).toString("base64")}`;
 
-    // Chunk image data for 64-byte limit
-    const chunkImageData = (value: string) => {
-      if (Buffer.from(value, "utf8").length <= 64) {
-        return Core.Metadatum.newText(value);
-      }
-      const chunks = new Core.MetadatumList();
-      for (let i = 0; i < value.length; i += 64) {
-        let j = 0;
-        while (Buffer.from(value.substring(i, i + 64 - j), "utf8").length > 64) {
-          j++;
-        }
-        chunks.add(Core.Metadatum.newText(value.substring(i, i + 64 - j)));
-        i -= j;
-      }
-      return Core.Metadatum.newList(chunks);
-    };
-
     tokenMetadataMap.insert(
       Core.Metadatum.newText("image"),
-      chunkImageData(svgImage),
+      chunkCip25Text(svgImage),
     );
-    // Use chunking for description in case it exceeds 64 bytes
     const description = `gADA: ${depositAmount / 1000000n} ADA for ${proposalName}`;
     tokenMetadataMap.insert(
       Core.Metadatum.newText("description"),
-      chunkImageData(description),
+      chunkCip25Text(description),
     );
     tokenMetadataMap.insert(
       Core.Metadatum.newText("ticker"),
@@ -245,10 +228,9 @@ export const browserDeposit = async ({
       Core.Metadatum.newText("lovelace"),
       Core.Metadatum.newInteger(depositAmount),
     );
-    // Use chunking for proposal_url in case it exceeds 64 bytes
     tokenMetadataMap.insert(
       Core.Metadatum.newText("proposal_url"),
-      chunkImageData(proposalUrlDecoded),
+      chunkCip25Text(proposalUrlDecoded),
     );
     tokenMetadataMap.insert(
       Core.Metadatum.newText("governance_action"),

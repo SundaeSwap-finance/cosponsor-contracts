@@ -46,3 +46,6 @@ export {
   pendingUtxoTracker,
   extractTransactionEffects,
 } from "./utxoTracker.js";
+
+// CIP-25 metadata utilities
+export { chunkCip25Text } from "./metadataUtils.js";
