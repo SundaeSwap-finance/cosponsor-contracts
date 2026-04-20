@@ -12,6 +12,7 @@ import { Bip32PrivateKey, NetworkId, Address } from "@blaze-cardano/core";
 import { mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 
+import { logger } from "../logger.js";
 dotenv.config();
 
 export interface BlockfrostConfig {
@@ -54,7 +55,7 @@ export class CardanoProvider {
 
   private log(...args: any[]): void {
     if (this.config.debugMode) {
-      console.log(...args);
+      logger.debug(...args);
     }
   }
 
@@ -263,7 +264,7 @@ export class CardanoProvider {
       await this.wallet.getUnspentOutputs();
       this.log("UTxOs synced");
     } catch (error) {
-      console.error("Error creating Blaze instance:", error);
+      logger.error("Error creating Blaze instance:", error);
       throw error;
     }
   }

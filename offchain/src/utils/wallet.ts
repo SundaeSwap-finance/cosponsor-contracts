@@ -3,6 +3,7 @@ import { Bip32PrivateKey } from "@blaze-cardano/core";
 import { mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 
+import { logger } from "../logger.js";
 export const createWallet = async (
   seedPhrase: string,
   provider: Provider,
@@ -26,7 +27,7 @@ export const createWallet = async (
   }
 
   if (debugMode) {
-    console.log(`✓ Wallet initialized: ${addressStr}`);
+    logger.debug(`✓ Wallet initialized: ${addressStr}`);
   }
   return wallet;
 };
@@ -49,7 +50,7 @@ export const createWalletFromPrivateKey = async (
   }
 
   if (debugMode) {
-    console.log(`✓ Wallet initialized: ${addressStr}`);
+    logger.debug(`✓ Wallet initialized: ${addressStr}`);
   }
   return wallet;
 };

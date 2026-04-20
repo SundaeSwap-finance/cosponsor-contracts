@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+
 import { Core, makeValue } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
@@ -13,6 +13,7 @@ import {
 } from "@validators/Types/GovernanceAction.js";
 import { chunkCip25Text } from "./metadataUtils.js";
 
+import { logger } from "../logger.js";
 /**
  * Browser-compatible deposit function
  *
@@ -30,9 +31,9 @@ export const browserDeposit = async ({
   cosponsoredProposal: ICosponsoredProposal;
   depositAmount: bigint;
 }) => {
-  console.log("=== browserDeposit START ===");
-  console.log("Action kind:", cosponsoredProposal.action.kind);
-  console.log(
+  logger.debug("=== browserDeposit START ===");
+  logger.debug("Action kind:", cosponsoredProposal.action.kind);
+  logger.debug(
     "Action data:",
     JSON.stringify(
       cosponsoredProposal.action,
@@ -54,8 +55,8 @@ export const browserDeposit = async ({
   );
   const cosponsorUtxoRef = BROWSER_CONFIG.scriptReferenceUtxos.cosponsor;
 
-  console.log("Building browser deposit transaction...");
-  console.log("Cosponsor hash:", cosponsorHash);
+  logger.debug("Building browser deposit transaction...");
+  logger.debug("Cosponsor hash:", cosponsorHash);
 
   // Try to resolve script reference via provider (works with Kupo+Ogmios)
   let cosponsorReference = await blaze.provider.resolveScriptRef(
@@ -64,9 +65,9 @@ export const browserDeposit = async ({
   );
 
   if (cosponsorReference) {
-    console.log("✅ Script reference resolved via provider (Kupo+Ogmios)");
+    logger.debug("✅ Script reference resolved via provider (Kupo+Ogmios)");
   } else {
-    console.log(
+    logger.debug(
       "⚠️ Provider could not resolve script reference, using Blockfrost fallback...",
     );
 
@@ -137,7 +138,7 @@ export const browserDeposit = async ({
       outputWithScript,
     );
 
-    console.log("✅ Using pre-computed script CBOR with reference UTxO");
+    logger.debug("✅ Using pre-computed script CBOR with reference UTxO");
   }
 
   // Add reference input for on-chain validation
@@ -165,7 +166,7 @@ export const browserDeposit = async ({
   const governanceActionData = buildGovernanceActionAsPlutusData(
     cosponsoredProposal.action,
   );
-  console.log(
+  logger.debug(
     "🔍 Governance action PlutusData CBOR:",
     governanceActionData.toCbor(),
   );
@@ -181,12 +182,12 @@ export const browserDeposit = async ({
         hash: cosponsoredProposal.anchor.hash,
       },
     });
-  console.log(
+  logger.debug(
     "🔍 CosponsoredProposalProcedure PlutusData CBOR:",
     cosponsoredProposalProcedureData.toCbor(),
   );
   const tokenAssetName = cosponsoredProposalProcedureData.hash();
-  console.log("🔍 Token asset name hash:", tokenAssetName);
+  logger.debug("🔍 Token asset name hash:", tokenAssetName);
   const policyId = Core.PolicyId(cosponsorHash);
 
   try {
@@ -257,7 +258,7 @@ export const browserDeposit = async ({
 
     // Add metadata to transaction using setAuxiliaryData (browser version of Blaze)
     // Note: Node.js version has setMetadata(), browser version uses setAuxiliaryData()
-    console.log("✅ Adding CIP-25 metadata to transaction");
+    logger.debug("✅ Adding CIP-25 metadata to transaction");
     const auxiliaryData = new Core.AuxiliaryData();
     auxiliaryData.setMetadata(metadata);
     tx = tx.setAuxiliaryData(auxiliaryData);
@@ -294,7 +295,7 @@ export const browserDeposit = async ({
   // Create datum for the deposit
   // We reuse the already-built CosponsoredProposalProcedure PlutusData and wrap it in CosponsorDatum::Before
   // This bypasses serialize()'s instanceof PlutusData check which fails due to Vite module duplication
-  console.log("🔧 Building CosponsorDatum::Before from raw PlutusData");
+  logger.debug("🔧 Building CosponsorDatum::Before from raw PlutusData");
 
   // CosponsorDatum::Before is Constructor 0 with the CosponsoredProposalProcedure as its single field
   const datumFields = new PlutusList();
@@ -304,9 +305,9 @@ export const browserDeposit = async ({
   );
 
   // Debug: Log the datum CBOR (the actual serialized format that goes on-chain)
-  console.log("🔍 Datum CBOR:", datumData.toCbor());
-  console.log("🔍 Deposit amount:", depositAmount.toString());
-  console.log("🔍 Governance action:", cosponsoredProposal.action.kind);
+  logger.debug("🔍 Datum CBOR:", datumData.toCbor());
+  logger.debug("🔍 Deposit amount:", depositAmount.toString());
+  logger.debug("🔍 Governance action:", cosponsoredProposal.action.kind);
 
   // Lock assets at the cosponsor script address
   // TxBuilder is immutable - reassign after each operation
@@ -315,7 +316,7 @@ export const browserDeposit = async ({
 
   // Return the incomplete TxBuilder - following the pattern from cosponsor-contracts
   // The caller will handle completion, evaluation, signing, and submission
-  console.log(
+  logger.debug(
     "✅ Transaction built successfully (incomplete, ready for completion)",
   );
 

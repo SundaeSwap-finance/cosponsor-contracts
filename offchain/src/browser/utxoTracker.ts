@@ -1,6 +1,7 @@
-/* eslint-disable no-console */
+
 import { Core } from "@blaze-cardano/sdk";
 
+import { logger } from "../logger.js";
 /**
  * Tracks pending UTxO changes from submitted transactions
  * This enables transaction chaining by knowing which UTxOs are spent
@@ -31,9 +32,9 @@ class PendingUtxoTracker {
     spentInputs: { txHash: string; outputIndex: number }[],
     createdOutputs: { outputIndex: number; utxo: Core.TransactionUnspentOutput }[],
   ) {
-    console.log(`📝 Recording tx ${submittedTxHash.slice(0, 16)}... effects:`);
-    console.log(`   - ${spentInputs.length} UTxO(s) spent`);
-    console.log(`   - ${createdOutputs.length} script UTxO(s) created`);
+    logger.debug(`📝 Recording tx ${submittedTxHash.slice(0, 16)}... effects:`);
+    logger.debug(`   - ${spentInputs.length} UTxO(s) spent`);
+    logger.debug(`   - ${createdOutputs.length} script UTxO(s) created`);
 
     // Track spent UTxOs AND remove them from createdUtxos if they were pending
     // This handles the case where TX2 spends a pending UTxO from TX1
@@ -49,7 +50,7 @@ class PendingUtxoTracker {
         (c) => !(c.txHash === input.txHash && c.outputIndex === input.outputIndex),
       );
       if (this.createdUtxos.length < beforeCount) {
-        console.log(`   🔄 Removed spent pending UTxO: ${input.txHash.slice(0, 16)}...#${input.outputIndex}`);
+        logger.debug(`   🔄 Removed spent pending UTxO: ${input.txHash.slice(0, 16)}...#${input.outputIndex}`);
       }
     }
 
@@ -97,7 +98,7 @@ class PendingUtxoTracker {
       const outputIndex = Number(utxo.input().index());
       const spent = this.isSpent(txHash, outputIndex);
       if (spent) {
-        console.log(`   🔄 Excluding spent UTxO: ${txHash.slice(0, 16)}...#${outputIndex}`);
+        logger.debug(`   🔄 Excluding spent UTxO: ${txHash.slice(0, 16)}...#${outputIndex}`);
       }
       return !spent;
     });
@@ -119,15 +120,15 @@ class PendingUtxoTracker {
       if (!existingIds.has(id)) {
         newPending.push(tracked.utxo);
         existingIds.add(id); // Prevent duplicates within pending list too
-        console.log(`   🔄 Adding pending UTxO: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
+        logger.debug(`   🔄 Adding pending UTxO: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
       } else {
         // UTxO is already in the list (tx was confirmed), remove from tracking
-        console.log(`   ✅ Pending UTxO already confirmed: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
+        logger.debug(`   ✅ Pending UTxO already confirmed: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
       }
     }
 
     const result = [...filtered, ...newPending];
-    console.log(`   📋 Final UTxO count: ${result.length} (${filtered.length} from provider + ${newPending.length} pending)`);
+    logger.debug(`   📋 Final UTxO count: ${result.length} (${filtered.length} from provider + ${newPending.length} pending)`);
     return result;
   }
 
@@ -139,7 +140,7 @@ class PendingUtxoTracker {
       (s) => !this.createdUtxos.some((c) => c.txHash === txHash),
     );
     this.createdUtxos = this.createdUtxos.filter((c) => c.txHash !== txHash);
-    console.log(`🧹 Cleared tracking for tx ${txHash.slice(0, 16)}...`);
+    logger.debug(`🧹 Cleared tracking for tx ${txHash.slice(0, 16)}...`);
   }
 
   /**
@@ -148,7 +149,7 @@ class PendingUtxoTracker {
   clearAll() {
     this.spentUtxos = [];
     this.createdUtxos = [];
-    console.log("🧹 Cleared all UTxO tracking");
+    logger.debug("🧹 Cleared all UTxO tracking");
   }
 
   /**
@@ -207,7 +208,7 @@ export function extractTransactionEffects(
     const utxo = new Core.TransactionUnspentOutput(input, output);
     createdOutputs.push({ outputIndex: i, utxo });
 
-    console.log(`   📦 Tracking script output #${i} (has datum)`);
+    logger.debug(`   📦 Tracking script output #${i} (has datum)`);
   }
 
   return { spentInputs, createdOutputs };

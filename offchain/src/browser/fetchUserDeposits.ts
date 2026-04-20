@@ -1,9 +1,10 @@
-/* eslint-disable no-console */
+
 import { Core } from "@blaze-cardano/sdk";
 import { parse, serialize } from "@blaze-cardano/data";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
 import { CosponsorTypes } from "../validators/GeneratedTypes/index.js";
 
+import { logger } from "../logger.js";
 /**
  * Map governance action constructor index to kind string
  * Must match Aiken on-chain enum order
@@ -250,28 +251,28 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
 
     // CosponsorDatum - tag 121 = Before (has data), tag 122 = After (no data)
     const datumTag = reader.readTag();
-    console.log("🔍 CBOR Parse: datumTag =", datumTag);
+    logger.debug("🔍 CBOR Parse: datumTag =", datumTag);
     if (datumTag === 122) {
       // CosponsorDatum::After - deposit has been processed, no proposal data
-      console.log("🔍 CBOR Parse: Datum is After (processed), no action data");
+      logger.debug("🔍 CBOR Parse: Datum is After (processed), no action data");
       return "Processed";
     }
     if (datumTag !== 121) {
-      console.log("🔍 CBOR Parse: Expected tag 121 or 122, got", datumTag);
+      logger.debug("🔍 CBOR Parse: Expected tag 121 or 122, got", datumTag);
       return "Unknown";
     } // Not CosponsorDatum::Before
 
     // Array with 1 element (CosponsoredProposalProcedure)
     // -1 means indefinite-length array, which is valid
     const datumLen = reader.readArrayLength();
-    console.log("🔍 CBOR Parse: datumLen =", datumLen);
+    logger.debug("🔍 CBOR Parse: datumLen =", datumLen);
     if (datumLen === 0) {
       return "Unknown";
     }
 
     // CosponsoredProposalProcedure - should be tag 121 (constructor 0)
     const cppTag = reader.readTag();
-    console.log("🔍 CBOR Parse: cppTag =", cppTag);
+    logger.debug("🔍 CBOR Parse: cppTag =", cppTag);
     if (cppTag !== 121) {
       return "Unknown";
     }
@@ -279,14 +280,14 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
     // Array with 2 elements [ProposalProcedure, Anchor]
     // -1 means indefinite-length array, which is valid
     const cppLen = reader.readArrayLength();
-    console.log("🔍 CBOR Parse: cppLen =", cppLen);
+    logger.debug("🔍 CBOR Parse: cppLen =", cppLen);
     if (cppLen === 0) {
       return "Unknown";
     }
 
     // ProposalProcedure - should be tag 121 (constructor 0)
     const ppTag = reader.readTag();
-    console.log("🔍 CBOR Parse: ppTag =", ppTag);
+    logger.debug("🔍 CBOR Parse: ppTag =", ppTag);
     if (ppTag !== 121) {
       return "Unknown";
     }
@@ -294,7 +295,7 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
     // Array with 3 elements [deposit, returnAddress, governanceAction]
     // -1 means indefinite-length array, which is valid
     const ppLen = reader.readArrayLength();
-    console.log("🔍 CBOR Parse: ppLen =", ppLen);
+    logger.debug("🔍 CBOR Parse: ppLen =", ppLen);
     if (ppLen === 0) {
       return "Unknown";
     }
@@ -307,7 +308,7 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
 
     // governanceAction - tag 121-127 indicates constructor 0-6
     const actionTag = reader.readTag();
-    console.log("🔍 CBOR Parse: actionTag =", actionTag);
+    logger.debug("🔍 CBOR Parse: actionTag =", actionTag);
     if (actionTag === null || actionTag < 121 || actionTag > 127) {
       return "Unknown";
     }
@@ -315,10 +316,10 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
     const actionIndex = actionTag - 121;
     const actionKind =
       GOVERNANCE_ACTION_KINDS[actionIndex] || `Unknown (${actionIndex})`;
-    console.log("🔍 CBOR Parse: SUCCESS! actionKind =", actionKind);
+    logger.debug("🔍 CBOR Parse: SUCCESS! actionKind =", actionKind);
     return actionKind;
   } catch (error) {
-    console.warn("Failed to parse governance action from CBOR:", error);
+    logger.warn("Failed to parse governance action from CBOR:", error);
     return "Unknown";
   }
 };
@@ -372,7 +373,7 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
 
     return { url, hash };
   } catch (error) {
-    console.warn("Failed to parse anchor from CBOR:", error);
+    logger.warn("Failed to parse anchor from CBOR:", error);
     return { url: "", hash: "" };
   }
 };
@@ -391,18 +392,18 @@ const computeProposalHashFromDatum = (datumPlutusData: any): string => {
     const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
 
     if (!parsedDatum) {
-      console.log("🔍 parse() returned null/undefined for datum");
+      logger.debug("🔍 parse() returned null/undefined for datum");
       return "";
     }
 
     // Check for "After" datum first
     if (parsedDatum === "After") {
-      console.log("🔍 Datum is After (processed proposal)");
+      logger.debug("🔍 Datum is After (processed proposal)");
       return "";
     }
 
     if (typeof parsedDatum !== "object") {
-      console.log("🔍 parsedDatum is not an object:", typeof parsedDatum);
+      logger.debug("🔍 parsedDatum is not an object:", typeof parsedDatum);
       return "";
     }
 
@@ -425,13 +426,13 @@ const computeProposalHashFromDatum = (datumPlutusData: any): string => {
       return proposalHash;
     }
 
-    console.log(
+    logger.debug(
       "🔍 Datum structure unexpected, keys:",
       Object.keys(parsedDatum),
     );
     return "";
   } catch (error) {
-    console.warn("Failed to compute proposal hash from datum:", error);
+    logger.warn("Failed to compute proposal hash from datum:", error);
     return "";
   }
 };
@@ -476,7 +477,7 @@ const extractActionKindFromDatum = (datumPlutusData: any): string => {
 
     return "Unknown";
   } catch (error) {
-    console.warn("Failed to extract action kind from datum:", error);
+    logger.warn("Failed to extract action kind from datum:", error);
     return "Unknown";
   }
 };
@@ -509,7 +510,7 @@ const extractAnchorFromDatum = (
 
     return { url: "", hash: "" };
   } catch (error) {
-    console.warn("Failed to extract anchor from datum:", error);
+    logger.warn("Failed to extract anchor from datum:", error);
     return { url: "", hash: "" };
   }
 };
@@ -562,7 +563,7 @@ export const fetchWithdrawalPlan = async (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   blaze: any,
 ): Promise<IWithdrawalPlan> => {
-  console.log("Fetching withdrawal plan...");
+  logger.debug("Fetching withdrawal plan...");
 
   const gAdaPolicyId = BROWSER_CONFIG.scripts.cosponsor.hash;
 
@@ -576,7 +577,7 @@ export const fetchWithdrawalPlan = async (
   );
 
   // Step 1: Get all gADA tokens from user's wallet
-  console.log("Scanning wallet for gADA tokens...");
+  logger.debug("Scanning wallet for gADA tokens...");
   const walletUtxos = await blaze.wallet.getUnspentOutputs();
 
   const userTokens: IUserGadaBalance[] = [];
@@ -609,13 +610,13 @@ export const fetchWithdrawalPlan = async (
     0n,
   );
 
-  console.log(
+  logger.debug(
     `Found ${userTokens.length} gADA token type(s), total: ${availableToWithdraw / 1_000_000n} ADA`,
   );
 
   // Step 2: Get all UTxOs at script address, sorted biggest-first
-  console.log("Fetching script UTxOs...");
-  console.log(`Script address: ${cosponsorScriptAddress.toBech32()}`);
+  logger.debug("Fetching script UTxOs...");
+  logger.debug(`Script address: ${cosponsorScriptAddress.toBech32()}`);
 
   // Get UTxOs from provider
   let rawScriptUtxos =
@@ -625,7 +626,7 @@ export const fetchWithdrawalPlan = async (
   const { pendingUtxoTracker } = await import("./utxoTracker.js");
   const stats = pendingUtxoTracker.getStats();
   if (stats.spentCount > 0 || stats.pendingCount > 0) {
-    console.log(`🔄 Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`);
+    logger.debug(`🔄 Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`);
     rawScriptUtxos = pendingUtxoTracker.applyToUtxoList(rawScriptUtxos);
   }
 
@@ -652,21 +653,21 @@ export const fetchWithdrawalPlan = async (
 
           const txId = utxo.input().transactionId().slice(0, 8);
           if (proposalHash) {
-            console.log(
+            logger.debug(
               `🔍 UTxO ${txId}...: ✓ actionKind=${actionKind}, hash=${proposalHash.slice(0, 16)}...`,
             );
           } else {
-            console.log(
+            logger.debug(
               `🔍 UTxO ${txId}...: ✗ No hash (actionKind=${actionKind})`,
             );
           }
         } else {
-          console.log(
+          logger.debug(
             `🔍 UTxO ${utxo.input().transactionId().slice(0, 8)}...: ✗ No datum`,
           );
         }
       } catch (error) {
-        console.warn("Failed to parse UTxO datum:", error);
+        logger.warn("Failed to parse UTxO datum:", error);
       }
 
       return {
@@ -686,12 +687,12 @@ export const fetchWithdrawalPlan = async (
 
   const totalScriptAda = scriptUtxos.reduce((sum, u) => sum + u.lockedAmount, 0n);
 
-  console.log(
+  logger.debug(
     `Found ${scriptUtxos.length} script UTxO(s), total: ${totalScriptAda / 1_000_000n} ADA`,
   );
 
   for (const utxo of scriptUtxos) {
-    console.log(
+    logger.debug(
       `  ${utxo.txHash.slice(0, 16)}...#${utxo.outputIndex}: ${utxo.lockedAmount / 1_000_000n} ADA`,
     );
   }
@@ -758,28 +759,28 @@ export const fetchUserDeposits = async (
     if (utxo.proposalHash) {
       // Store UTxO by its computed proposal hash
       utxoByProposalHash.set(utxo.proposalHash, utxo);
-      console.log(
+      logger.debug(
         `  UTxO ${utxo.txHash.slice(0, 8)}... hash ${utxo.proposalHash.slice(0, 16)}... action: ${utxo.actionKind}`,
       );
     }
   }
 
-  console.log(
+  logger.debug(
     `Created proposal hash map with ${utxoByProposalHash.size} entries`,
   );
 
   // Debug: Show all computed hashes
-  console.log("Available proposal hashes in map:");
+  logger.debug("Available proposal hashes in map:");
   for (const [hash, utxo] of utxoByProposalHash.entries()) {
-    console.log(`  ${hash} -> ${utxo.actionKind}`);
+    logger.debug(`  ${hash} -> ${utxo.actionKind}`);
   }
 
   // Convert to legacy format - create one "deposit" per token type
   const deposits: IUserDeposit[] = [];
 
-  console.log("\nUser tokens to match:");
+  logger.debug("\nUser tokens to match:");
   for (const token of plan.userTokens) {
-    console.log(`  Token asset name: ${token.tokenAssetName}`);
+    logger.debug(`  Token asset name: ${token.tokenAssetName}`);
   }
 
   for (const token of plan.userTokens) {
@@ -788,7 +789,7 @@ export const fetchUserDeposits = async (
 
     if (matchedUtxo) {
       // Found exact match by proposal hash
-      console.log(
+      logger.debug(
         `  ✓ Token ${token.tokenAssetName.slice(0, 16)}... matched to ${matchedUtxo.actionKind}`,
       );
 
@@ -810,7 +811,7 @@ export const fetchUserDeposits = async (
       });
     } else {
       // No match found - fall back to selecting UTxOs by amount
-      console.log(
+      logger.debug(
         `  ✗ Token ${token.tokenAssetName.slice(0, 16)}... no hash match, using fallback`,
       );
 
@@ -841,7 +842,7 @@ export const fetchUserDeposits = async (
     }
   }
 
-  console.log(`Created ${deposits.length} withdrawal-ready deposit(s)`);
+  logger.debug(`Created ${deposits.length} withdrawal-ready deposit(s)`);
 
   return deposits;
 };

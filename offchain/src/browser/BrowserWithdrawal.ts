@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+
 import { Core, makeValue } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
@@ -10,6 +10,7 @@ import {
   fetchWithdrawalPlan,
 } from "./fetchUserDeposits.js";
 
+import { logger } from "../logger.js";
 /**
  * Browser-compatible withdrawal function
  *
@@ -38,7 +39,7 @@ export const browserWithdraw = async ({
     );
   }
 
-  console.log(`🔄 Starting withdrawal of ${withdrawAmount / 1_000_000n} ADA`);
+  logger.debug(`🔄 Starting withdrawal of ${withdrawAmount / 1_000_000n} ADA`);
 
   let tx = blaze.newTransaction();
 
@@ -55,9 +56,9 @@ export const browserWithdraw = async ({
   );
 
   if (cosponsorReference) {
-    console.log("✅ Script reference resolved via provider");
+    logger.debug("✅ Script reference resolved via provider");
   } else {
-    console.log("⚠️ Using Blockfrost fallback for script reference...");
+    logger.debug("⚠️ Using Blockfrost fallback for script reference...");
 
     const scriptCbor = BROWSER_CONFIG.scripts.cosponsor.cbor;
     if (!scriptCbor) {
@@ -100,7 +101,7 @@ export const browserWithdraw = async ({
       outputWithScript,
     );
 
-    console.log("✅ Using pre-computed script CBOR");
+    logger.debug("✅ Using pre-computed script CBOR");
   }
 
   tx = tx.addReferenceInput(cosponsorReference);
@@ -147,7 +148,7 @@ export const browserWithdraw = async ({
   }
 
   tx = tx.addReferenceInput(stateReference);
-  console.log("✅ Added CosponsorState reference input");
+  logger.debug("✅ Added CosponsorState reference input");
 
   // Select script UTxOs biggest-first to cover withdrawal amount
   const { selected: selectedUtxos, totalSelected } = selectUtxosForWithdrawal(
@@ -161,7 +162,7 @@ export const browserWithdraw = async ({
     );
   }
 
-  console.log(
+  logger.debug(
     `📦 Selected ${selectedUtxos.length} UTxO(s) with ${totalSelected / 1_000_000n} ADA`,
   );
 
@@ -173,7 +174,7 @@ export const browserWithdraw = async ({
 
   for (const scriptUtxo of selectedUtxos) {
     tx = tx.addInput(scriptUtxo.utxo, withdrawRedeemer);
-    console.log(
+    logger.debug(
       `  ✅ Added UTxO: ${scriptUtxo.txHash.slice(0, 16)}...#${scriptUtxo.outputIndex} (${scriptUtxo.lockedAmount / 1_000_000n} ADA)`,
     );
   }
@@ -187,7 +188,7 @@ export const browserWithdraw = async ({
   let remainingToBurn = withdrawAmount;
   const tokensToBurn = new Map<string, bigint>(); // assetName -> amount to burn
 
-  console.log(
+  logger.debug(
     `🔍 Looking for ${withdrawAmount / 1_000_000n} ADA worth of gADA tokens to burn...`,
   );
 
@@ -212,7 +213,7 @@ export const browserWithdraw = async ({
         tokensToBurn.set(assetName, current + burnAmount);
         remainingToBurn -= burnAmount;
         utxoHasTokens = true;
-        console.log(
+        logger.debug(
           `  📦 Found ${burnAmount / 1_000_000n} ADA worth of token ${assetName.slice(0, 16)}...`,
         );
       }
@@ -245,7 +246,7 @@ export const browserWithdraw = async ({
   const burnAmounts = new Map<Core.AssetName, bigint>();
   for (const [assetName, amount] of tokensToBurn) {
     burnAmounts.set(Core.AssetName(assetName), -amount); // Negative for burning
-    console.log(
+    logger.debug(
       `🔥 Burning ${amount / 1_000_000n} gADA of token ${assetName.slice(0, 16)}...`,
     );
   }
@@ -262,7 +263,7 @@ export const browserWithdraw = async ({
     paymentCredential.type === Core.CredentialType.KeyHash
   ) {
     tx = tx.addRequiredSigner(paymentCredential.hash);
-    console.log(
+    logger.debug(
       `✍️ Added required signer: ${paymentCredential.hash.slice(0, 16)}...`,
     );
   } else {
@@ -274,7 +275,7 @@ export const browserWithdraw = async ({
   // to satisfy the no_ada_leak validator check
   const excessAda = totalSelected - withdrawAmount;
   if (excessAda > 0n) {
-    console.log(
+    logger.debug(
       `💫 Returning ${excessAda / 1_000_000n} ADA back to script address`,
     );
 
@@ -301,8 +302,8 @@ export const browserWithdraw = async ({
   tx = tx.payAssets(changeAddress, makeValue(withdrawAmount));
   tx = tx.setChangeAddress(changeAddress);
 
-  console.log(`💰 Withdrawing ${withdrawAmount / 1_000_000n} ADA to wallet`);
-  console.log("✅ Withdrawal transaction built successfully");
+  logger.debug(`💰 Withdrawing ${withdrawAmount / 1_000_000n} ADA to wallet`);
+  logger.debug("✅ Withdrawal transaction built successfully");
 
   return tx;
 };

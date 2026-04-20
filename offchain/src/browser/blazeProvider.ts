@@ -1,6 +1,7 @@
-/* eslint-disable no-console */
+
 import { Blaze, Blockfrost, Core } from "@blaze-cardano/sdk";
 
+import { logger } from "../logger.js";
 // Ogmios purpose names to Blaze RedeemerTag mapping
 const ogmiosPurposeToTag: Record<string, number> = {
   spend: 0,
@@ -27,7 +28,7 @@ export function createOgmiosEvaluator(ogmiosUrl: string): Core.Evaluator {
   ): Promise<Core.Redeemers> => {
     const txCbor = tx.toCbor();
 
-    console.log("🔍 Evaluating transaction with Ogmios (mempool-aware)...");
+    logger.debug("🔍 Evaluating transaction with Ogmios (mempool-aware)...");
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(ogmiosUrl);
@@ -65,7 +66,7 @@ export function createOgmiosEvaluator(ogmiosUrl: string): Core.Evaluator {
           // Parse Ogmios response and build Redeemers
           // Ogmios returns: [{ validator: { purpose, index }, budget: { memory, cpu } }]
           const evaluations = response.result;
-          console.log("✅ Ogmios evaluation result:", evaluations);
+          logger.debug("✅ Ogmios evaluation result:", evaluations);
 
           // Get existing redeemers from transaction (as array via values())
           const currentRedeemers = tx.witnessSet().redeemers()?.values();
@@ -168,7 +169,7 @@ export async function createProvider(options?: BrowserProviderOptions) {
     | "cardano-mainnet"
     | "cardano-sanchonet";
 
-  console.log("Creating Blockfrost provider for network:", BLOCKFROST_NETWORK);
+  logger.debug("Creating Blockfrost provider for network:", BLOCKFROST_NETWORK);
 
   return new Blockfrost({
     network: BLOCKFROST_NETWORK,
@@ -285,10 +286,10 @@ export async function createBlazeWithBrowserWallet(
   const provider = await createProvider(options);
   const wallet = createCIP30Wallet(walletObserver.api, provider);
 
-  console.log("Creating Blaze instance with Blockfrost provider...");
+  logger.debug("Creating Blaze instance with Blockfrost provider...");
   // @ts-expect-error - Wallet interface mismatch with Blaze SDK types
   const blaze = await Blaze.from(provider, wallet);
 
-  console.log("Blaze instance created successfully");
+  logger.debug("Blaze instance created successfully");
   return blaze;
 }

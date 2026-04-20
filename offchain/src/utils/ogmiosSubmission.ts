@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import { Core } from "@blaze-cardano/sdk";
 
+import { logger } from "../logger.js";
 export interface OgmiosSubmissionResult {
   success: boolean;
   txId?: string;
@@ -18,7 +19,7 @@ export class OgmiosTransactionSubmitter {
 
   private log(...args: any[]): void {
     if (this.debugMode) {
-      console.log(...args);
+      logger.debug(...args);
     }
   }
 

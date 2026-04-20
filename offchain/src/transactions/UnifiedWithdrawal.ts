@@ -15,6 +15,7 @@ import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
 import { serialize } from "@blaze-cardano/data";
 import { Address } from "@blaze-cardano/core";
 
+import { logger } from "../logger.js";
 export interface IDepositWithdrawal {
   /** The transaction hash where funds were deposited */
   depositTxHash: string;
@@ -48,7 +49,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
 }: IWithdrawalArgs<P, W>): Promise<TxBuilder> => {
   const log = (...args: any[]) => {
     if (debugMode) {
-      console.log(...args);
+      logger.debug(...args);
     }
   };
   if (deposits.length === 0) {
@@ -125,7 +126,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
         // Validate amount matches expected
         if (amount !== deposit.depositAmount) {
           if (debugMode) {
-            console.warn(
+            logger.warn(
               `⚠️ Amount mismatch for ${deposit.depositTxHash}:${deposit.depositOutputIndex}: expected ${deposit.depositAmount}, found ${amount}`,
             );
           }
