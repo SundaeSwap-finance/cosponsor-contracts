@@ -1,5 +1,5 @@
 
-import { Core } from "@blaze-cardano/sdk";
+import { Blaze, Core, Provider, Wallet } from "@blaze-cardano/sdk";
 import { parse, serialize } from "@blaze-cardano/data";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
 import { CosponsorTypes } from "../validators/GeneratedTypes/index.js";
@@ -385,8 +385,7 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
  * The gADA token asset name is computed as:
  *   serialize(CosponsorTypes.CosponsoredProposalProcedure, proposal).hash()
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const computeProposalHashFromDatum = (datumPlutusData: any): string => {
+const computeProposalHashFromDatum = (datumPlutusData: Core.PlutusData): string => {
   try {
     // Parse the datum using the same schema used when creating it
     const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
@@ -440,8 +439,7 @@ const computeProposalHashFromDatum = (datumPlutusData: any): string => {
 /**
  * Extract governance action kind from parsed datum
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const extractActionKindFromDatum = (datumPlutusData: any): string => {
+const extractActionKindFromDatum = (datumPlutusData: Core.PlutusData): string => {
   try {
     const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
 
@@ -485,9 +483,8 @@ const extractActionKindFromDatum = (datumPlutusData: any): string => {
 /**
  * Extract anchor from parsed datum
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const extractAnchorFromDatum = (
-  datumPlutusData: any,
+  datumPlutusData: Core.PlutusData,
 ): { url: string; hash: string } => {
   try {
     const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
@@ -530,8 +527,7 @@ export interface IScriptUtxo {
   /** ADA locked at this UTxO (in lovelace) */
   lockedAmount: bigint;
   /** The raw UTxO for transaction building */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  utxo: any;
+  utxo: Core.TransactionUnspentOutput;
   /** Parsed governance action kind from the datum */
   actionKind: string;
   /** Parsed anchor from the datum */
@@ -560,8 +556,7 @@ export interface IWithdrawalPlan {
  * Script UTxOs are filled biggest-first to minimize transaction size.
  */
 export const fetchWithdrawalPlan = async (
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blaze: any,
+  blaze: Blaze<Provider, Wallet>,
 ): Promise<IWithdrawalPlan> => {
   logger.debug("Fetching withdrawal plan...");
 
@@ -631,8 +626,7 @@ export const fetchWithdrawalPlan = async (
   }
 
   const scriptUtxos: IScriptUtxo[] = rawScriptUtxos.map(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (utxo: any) => {
+    (utxo: Core.TransactionUnspentOutput) => {
       // Parse datum to get action kind, anchor, and proposal hash
       let actionKind = "Unknown";
       let anchor = { url: "", hash: "" };
@@ -643,8 +637,11 @@ export const fetchWithdrawalPlan = async (
         const datum = output.datum();
 
         if (datum) {
-          // Get the inline datum (PlutusData)
-          const inlineDatum = datum.asInlineData?.() || datum;
+          // Get the inline datum (PlutusData). Cast bridges the slightly
+          // divergent Datum types between @blaze-cardano/core and
+          // @cardano-sdk/core that surface through transitive imports.
+          const inlineDatum = (datum.asInlineData?.() ??
+            datum) as unknown as Core.PlutusData;
 
           // Use the typed parsing functions that use the same serialize logic as minting
           actionKind = extractActionKindFromDatum(inlineDatum);
@@ -747,8 +744,7 @@ export interface IUserDeposit {
  * Legacy function that returns IUserDeposit[] format
  */
 export const fetchUserDeposits = async (
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blaze: any,
+  blaze: Blaze<Provider, Wallet>,
 ): Promise<IUserDeposit[]> => {
   const plan = await fetchWithdrawalPlan(blaze);
 

@@ -1,5 +1,5 @@
 
-import { Core, makeValue } from "@blaze-cardano/sdk";
+import { Core, makeValue, Blaze, Provider, Wallet } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
 import { ICosponsoredProposal } from "@validators/Cosponsor.js";
@@ -26,8 +26,7 @@ export const browserDeposit = async ({
   cosponsoredProposal,
   depositAmount,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blaze: any;
+  blaze: Blaze<Provider, Wallet>;
   cosponsoredProposal: ICosponsoredProposal;
   depositAmount: bigint;
 }) => {
@@ -60,7 +59,7 @@ export const browserDeposit = async ({
 
   // Try to resolve script reference via provider (works with Kupo+Ogmios)
   let cosponsorReference = await blaze.provider.resolveScriptRef(
-    cosponsorHash,
+    Core.Hash28ByteBase16(cosponsorHash),
     scriptAddress,
   );
 
@@ -279,7 +278,7 @@ export const browserDeposit = async ({
 
   tx = tx.addMint(
     policyId,
-    new Map([[tokenAssetName, depositAmount]]),
+    new Map([[Core.AssetName(tokenAssetName.toString()), depositAmount]]),
     mintRedeemer,
   );
 

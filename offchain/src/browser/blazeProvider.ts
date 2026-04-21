@@ -1,5 +1,11 @@
 
-import { Blaze, Blockfrost, Core } from "@blaze-cardano/sdk";
+import {
+  Blaze,
+  Blockfrost,
+  CIP30Interface,
+  Core,
+  Provider,
+} from "@blaze-cardano/sdk";
 
 import { logger } from "../logger.js";
 // Ogmios purpose names to Blaze RedeemerTag mapping
@@ -83,9 +89,13 @@ export function createOgmiosEvaluator(ogmiosUrl: string): Core.Evaluator {
           // Update each redeemer with execution units from Ogmios
           const evaledRedeemers = new Set<Core.Redeemer>();
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          for (const evaluation of evaluations as any[]) {
-            const purpose = ogmiosPurposeToTag[evaluation.validator?.purpose] ?? 0;
+          interface OgmiosEvaluation {
+            validator?: { purpose?: string; index?: number };
+            budget: { memory: number; cpu: number };
+          }
+
+          for (const evaluation of evaluations as OgmiosEvaluation[]) {
+            const purpose = ogmiosPurposeToTag[evaluation.validator?.purpose ?? ""] ?? 0;
             const index = BigInt(evaluation.validator?.index ?? 0);
 
             // Find matching redeemer
@@ -138,14 +148,14 @@ export async function createProvider(options?: BrowserProviderOptions) {
   const BLOCKFROST_API_KEY =
     options?.blockfrostApiKey ||
     (typeof import.meta !== "undefined"
-      ? // @ts-expect-error - Vite env access
-        import.meta.env?.COSPONSOR_BLOCKFROST_API_KEY
+      ? (import.meta as { env?: Record<string, string | undefined> }).env
+          ?.COSPONSOR_BLOCKFROST_API_KEY
       : undefined);
   const networkFromEnv =
     options?.network ||
     (typeof import.meta !== "undefined"
-      ? // @ts-expect-error - Vite env access
-        import.meta.env?.COSPONSOR_BLOCKFROST_NETWORK
+      ? (import.meta as { env?: Record<string, string | undefined> }).env
+          ?.COSPONSOR_BLOCKFROST_NETWORK
       : undefined) ||
     "preprod";
 
@@ -181,8 +191,10 @@ export async function createProvider(options?: BrowserProviderOptions) {
  * Creates a CIP-30 wallet wrapper for use with Blaze
  * This wraps the browser wallet API (from wallet-lite) to work with Blaze
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createCIP30Wallet(walletApi: any, provider: any) {
+export function createCIP30Wallet(
+  walletApi: CIP30Interface,
+  provider: Provider,
+) {
   // Create a wallet implementation that Blaze can use
   // The wallet needs to provide methods that Blaze expects
   return {
@@ -192,12 +204,12 @@ export function createCIP30Wallet(walletApi: any, provider: any) {
     },
     getChangeAddress: async () => {
       const addressHex = await walletApi.getChangeAddress();
-      return Core.Address.fromBytes(addressHex);
+      return Core.Address.fromBytes(Core.HexBlob(addressHex));
     },
     getRewardAddresses: async () => {
       const rewardAddresses = await walletApi.getRewardAddresses();
       return rewardAddresses.map((addr: string) =>
-        Core.Address.fromBytes(addr as Core.HexBlob),
+        Core.Address.fromBytes(Core.HexBlob(addr)),
       );
     },
     getUsedAddresses: async () => {
@@ -207,7 +219,7 @@ export function createCIP30Wallet(walletApi: any, provider: any) {
     getUnusedAddresses: async () => {
       // CIP-30 doesn't have this either, return change address
       const addressHex = await walletApi.getChangeAddress();
-      return [Core.Address.fromBytes(addressHex)];
+      return [Core.Address.fromBytes(Core.HexBlob(addressHex))];
     },
     getBalance: async () => {
       // Get total balance from UTxOs
@@ -220,10 +232,11 @@ export function createCIP30Wallet(walletApi: any, provider: any) {
         Core.TransactionUnspentOutput.fromCbor(utxoHex as Core.HexBlob),
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return utxos.reduce((total: bigint, utxo: any) => {
-        return total + utxo.output().amount().coin();
-      }, 0n);
+      return utxos.reduce(
+        (total: bigint, utxo: Core.TransactionUnspentOutput) =>
+          total + utxo.output().amount().coin(),
+        0n,
+      );
     },
     getUnspentOutputs: async () => {
       const utxosHex = await walletApi.getUtxos();
@@ -253,21 +266,20 @@ export function createCIP30Wallet(walletApi: any, provider: any) {
     },
     signTx: async (txHex: string, partialSign: boolean = false) => {
       const witnessSetHex = await walletApi.signTx(txHex, partialSign);
-      return Core.TransactionWitnessSet.fromCbor(witnessSetHex);
+      return Core.TransactionWitnessSet.fromCbor(Core.HexBlob(witnessSetHex));
     },
     signTransaction: async (txHex: string, partialSign: boolean = false) => {
       // Alias for signTx
       const witnessSetHex = await walletApi.signTx(txHex, partialSign);
-      return Core.TransactionWitnessSet.fromCbor(witnessSetHex);
+      return Core.TransactionWitnessSet.fromCbor(Core.HexBlob(witnessSetHex));
     },
     signData: async (address: string, payload: string) => {
       const signature = await walletApi.signData(address, payload);
       return signature;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    postTransaction: async (tx: any) => {
+    postTransaction: async (tx: Core.Transaction | string) => {
       // Submit transaction through wallet
-      const txHex = tx.toCbor ? tx.toCbor() : tx;
+      const txHex = typeof tx === "string" ? tx : tx.toCbor();
       const txHash = await walletApi.submitTx(txHex);
       return txHash;
     },
@@ -276,11 +288,18 @@ export function createCIP30Wallet(walletApi: any, provider: any) {
 }
 
 /**
+ * Minimal structural shape of a wallet observer this SDK consumes.
+ * Matches @sundaeswap/wallet-lite's WalletObserver without coupling to it.
+ */
+export interface BrowserWalletObserver {
+  api: CIP30Interface;
+}
+
+/**
  * Creates a Blaze instance using browser wallet with configured provider
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function createBlazeWithBrowserWallet(
-  walletObserver: any,
+  walletObserver: BrowserWalletObserver,
   options?: BrowserProviderOptions,
 ) {
   const provider = await createProvider(options);

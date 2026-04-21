@@ -47,7 +47,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
   deposits,
   debugMode = false,
 }: IWithdrawalArgs<P, W>): Promise<TxBuilder> => {
-  const log = (...args: any[]) => {
+  const log = (...args: unknown[]) => {
     if (debugMode) {
       logger.debug(...args);
     }
@@ -100,7 +100,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
 
   // Find and validate all deposit UTxOs
   const depositUtxos: Array<{
-    utxo: any;
+    utxo: Core.TransactionUnspentOutput;
     amount: bigint;
     deposit: IDepositWithdrawal;
   }> = [];
@@ -243,7 +243,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
 
   // Find wallet UTxOs with required gAda tokens
   const walletUtxos = await blaze.wallet.getUnspentOutputs();
-  const selectedUtxos: any[] = [];
+  const selectedUtxos: Core.TransactionUnspentOutput[] = [];
   const collectedTokens = new Map<string, bigint>();
 
   // Initialize collected amounts

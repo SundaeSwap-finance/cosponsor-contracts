@@ -1,4 +1,5 @@
 import { parse } from "@blaze-cardano/data";
+import { Core } from "@blaze-cardano/sdk";
 import { CosponsorTypes } from "@validators/GeneratedTypes";
 import { ICosponsoredProposal } from "@validators/Cosponsor";
 import { TGovernanceAction } from "@validators/Types/GovernanceAction";
@@ -6,8 +7,13 @@ import { TGovernanceAction } from "@validators/Types/GovernanceAction";
 export interface ParsedCosponsorDatum {
   proposal: ICosponsoredProposal;
   datumType: "Before" | "After";
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  rawCosponsoredProposal?: any;
+  /**
+   * The raw parsed inner `cosponsored` object, kept as `unknown` because its
+   * shape is tied to generated validator types that can drift independently.
+   * Downstream callers that need specific fields should narrow with parse()
+   * from @blaze-cardano/data.
+   */
+  rawCosponsoredProposal?: unknown;
 }
 
 /**
@@ -16,8 +22,7 @@ export interface ParsedCosponsorDatum {
  * @returns Parsed datum info or null if parsing fails
  */
 export const parseCosponsorDatum = (
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  datumData: any,
+  datumData: Core.PlutusData,
 ): ParsedCosponsorDatum | null => {
   try {
     const datum = parse(CosponsorTypes.CosponsorDatum, datumData);

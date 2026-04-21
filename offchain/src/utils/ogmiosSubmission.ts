@@ -17,15 +17,15 @@ export class OgmiosTransactionSubmitter {
     this.debugMode = debugMode;
   }
 
-  private log(...args: any[]): void {
+  private log(...args: unknown[]): void {
     if (this.debugMode) {
       logger.debug(...args);
     }
   }
 
   async submitTransaction(
-    builtTx: any,
-    witnessSet: any,
+    builtTx: Core.Transaction,
+    witnessSet: Core.TransactionWitnessSet,
   ): Promise<OgmiosSubmissionResult> {
     return new Promise((resolve) => {
       const ws = new WebSocket(this.ogmiosUrl);
@@ -186,7 +186,10 @@ export class OgmiosTransactionSubmitter {
     });
   }
 
-  async evaluateTransaction(builtTx: any, witnessSet: any): Promise<any> {
+  async evaluateTransaction(
+    builtTx: Core.Transaction,
+    witnessSet: Core.TransactionWitnessSet,
+  ): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(this.ogmiosUrl);
 

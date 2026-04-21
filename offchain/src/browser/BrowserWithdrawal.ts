@@ -1,5 +1,5 @@
 
-import { Core, makeValue } from "@blaze-cardano/sdk";
+import { Core, makeValue, Blaze, Provider, Wallet } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
@@ -23,8 +23,7 @@ export const browserWithdraw = async ({
   withdrawalPlan,
   withdrawAmount,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blaze: any;
+  blaze: Blaze<Provider, Wallet>;
   withdrawalPlan: IWithdrawalPlan;
   /** Amount to withdraw in lovelace (must be <= availableToWithdraw) */
   withdrawAmount: bigint;
@@ -51,7 +50,7 @@ export const browserWithdraw = async ({
 
   // Resolve script reference (Kupo+Ogmios or Blockfrost fallback)
   let cosponsorReference = await blaze.provider.resolveScriptRef(
-    cosponsorHash,
+    Core.Hash28ByteBase16(cosponsorHash),
     scriptAddress,
   );
 
@@ -118,7 +117,7 @@ export const browserWithdraw = async ({
   );
 
   let stateReference = await blaze.provider.resolveScriptRef(
-    stateHash,
+    Core.Hash28ByteBase16(stateHash),
     stateScriptAddress,
   );
 
@@ -262,7 +261,9 @@ export const browserWithdraw = async ({
     paymentCredential &&
     paymentCredential.type === Core.CredentialType.KeyHash
   ) {
-    tx = tx.addRequiredSigner(paymentCredential.hash);
+    tx = tx.addRequiredSigner(
+      Core.Ed25519KeyHashHex(paymentCredential.hash),
+    );
     logger.debug(
       `✍️ Added required signer: ${paymentCredential.hash.slice(0, 16)}...`,
     );
@@ -294,8 +295,14 @@ export const browserWithdraw = async ({
       throw new Error("Selected UTxO has no datum - cannot create change output");
     }
 
-    // Send excess back to script with original datum
-    tx = tx.lockAssets(cosponsorScriptAddress, makeValue(excessAda), firstUtxoDatum);
+    // Send excess back to script with original datum.
+    // Cast bridges Blaze's Datum type and the equivalent from @cardano-sdk/core
+    // that surfaces here via transitive types; they are structurally the same.
+    tx = tx.lockAssets(
+      cosponsorScriptAddress,
+      makeValue(excessAda),
+      firstUtxoDatum as unknown as Core.Datum,
+    );
   }
 
   // Send withdrawn ADA to wallet
@@ -313,8 +320,7 @@ export const browserWithdrawLegacy = async ({
   blaze,
   deposits,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blaze: any;
+  blaze: Blaze<Provider, Wallet>;
   deposits: { depositAmount: bigint; tokenAssetName: string }[];
 }) => {
   // Use the new approach

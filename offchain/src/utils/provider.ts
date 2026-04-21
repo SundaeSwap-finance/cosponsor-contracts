@@ -8,7 +8,12 @@ import {
 } from "@blaze-cardano/sdk";
 import { MIN_PROVIDER_BALANCE } from "@/Config";
 import { Unwrapped } from "@blaze-cardano/ogmios";
-import { Bip32PrivateKey, NetworkId, Address } from "@blaze-cardano/core";
+import {
+  Bip32PrivateKey,
+  Bip32PrivateKeyHex,
+  NetworkId,
+  Address,
+} from "@blaze-cardano/core";
 import { mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 
@@ -46,14 +51,14 @@ export type ProviderConfig = BlockfrostConfig | KupmiosConfig;
 export class CardanoProvider {
   private provider!: Provider;
   private wallet!: HotWallet;
-  private blaze!: Blaze<any, HotWallet>;
+  private blaze!: Blaze<Provider, HotWallet>;
   private config: ProviderConfig;
 
   constructor(config: ProviderConfig) {
     this.config = config;
   }
 
-  private log(...args: any[]): void {
+  private log(...args: unknown[]): void {
     if (this.config.debugMode) {
       logger.debug(...args);
     }
@@ -127,8 +132,10 @@ export class CardanoProvider {
       const ogmios = await Unwrapped.Ogmios.new(this.config.ogmiosUrl);
       return new Kupmios(this.config.kupoUrl, ogmios);
     } else {
+      // Exhaustive check: if a new config type is added, TypeScript will surface it here.
+      const _exhaustive: never = this.config;
       throw new Error(
-        `Invalid provider configuration for type: ${(this.config as any).type}`,
+        `Invalid provider configuration: ${JSON.stringify(_exhaustive)}`,
       );
     }
   }
@@ -150,26 +157,19 @@ export class CardanoProvider {
         this.config.wallet.seedPhrase,
         wordlist,
       );
-      const rootKey = Bip32PrivateKey.fromBip39Entropy(
-        Buffer.from(entropy) as any,
-        Buffer.from("") as any,
-      );
-      wallet = await HotWallet.fromMasterkey(
-        rootKey.hex() as any,
-        this.provider,
-      );
+      const rootKey = Bip32PrivateKey.fromBip39Entropy(Buffer.from(entropy), "");
+      wallet = await HotWallet.fromMasterkey(rootKey.hex(), this.provider);
     } else if (this.config.wallet.privateKey) {
       this.log("Using private key from environment");
       wallet = await HotWallet.fromMasterkey(
-        this.config.wallet.privateKey as any,
+        Bip32PrivateKeyHex(this.config.wallet.privateKey),
         this.provider,
       );
     } else {
       throw new Error("No wallet configuration found");
     }
 
-    // Set provider on wallet (required for some operations)
-    (wallet as any).provider = this.provider;
+    // Blaze's HotWallet keeps a reference to its provider internally; no extra wiring needed.
 
     return wallet;
   }
@@ -252,10 +252,10 @@ export class CardanoProvider {
     try {
       this.blaze = (await Promise.race([
         Blaze.from(this.provider, this.wallet),
-        new Promise((_, reject) =>
+        new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("Blaze creation timeout")), 15000),
         ),
-      ])) as Blaze<any, HotWallet>;
+      ])) as Blaze<Provider, HotWallet>;
 
       this.log("Blaze instance created successfully");
 
@@ -269,7 +269,7 @@ export class CardanoProvider {
     }
   }
 
-  getBlaze(): Blaze<any, HotWallet> {
+  getBlaze(): Blaze<Provider, HotWallet> {
     if (!this.blaze) {
       throw new Error("Provider not initialized. Call initialize() first.");
     }
@@ -321,13 +321,10 @@ export class CardanoProvider {
   }
 
   async cleanup(): Promise<void> {
-    // Close connections if available
-    if (
-      this.config.type === "kupmios" &&
-      (this.provider as any).ogmios?.shutdown
-    ) {
+    // Close the Ogmios websocket when using Kupmios.
+    if (this.config.type === "kupmios" && this.provider instanceof Kupmios) {
       this.log("Closing Ogmios connection...");
-      await (this.provider as any).ogmios.shutdown();
+      await this.provider.ogmios.kill();
     }
   }
 }

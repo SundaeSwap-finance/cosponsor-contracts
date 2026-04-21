@@ -1,5 +1,5 @@
 import { HotWallet, Provider } from "@blaze-cardano/sdk";
-import { Bip32PrivateKey } from "@blaze-cardano/core";
+import { Bip32PrivateKey, Bip32PrivateKeyHex } from "@blaze-cardano/core";
 import { mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 
@@ -11,11 +11,8 @@ export const createWallet = async (
   debugMode?: boolean,
 ): Promise<HotWallet> => {
   const entropy = mnemonicToEntropy(seedPhrase, wordlist);
-  const rootKey = Bip32PrivateKey.fromBip39Entropy(
-    Buffer.from(entropy) as any,
-    Buffer.from("") as any,
-  );
-  const wallet = await HotWallet.fromMasterkey(rootKey.hex() as any, provider);
+  const rootKey = Bip32PrivateKey.fromBip39Entropy(Buffer.from(entropy), "");
+  const wallet = await HotWallet.fromMasterkey(rootKey.hex(), provider);
 
   const address = await wallet.getChangeAddress();
   const addressStr = address.toBech32();
@@ -38,7 +35,10 @@ export const createWalletFromPrivateKey = async (
   expectedAddress?: string,
   debugMode?: boolean,
 ): Promise<HotWallet> => {
-  const wallet = await HotWallet.fromMasterkey(privateKey as any, provider);
+  const wallet = await HotWallet.fromMasterkey(
+    Bip32PrivateKeyHex(privateKey),
+    provider,
+  );
 
   const address = await wallet.getChangeAddress();
   const addressStr = address.toBech32();
