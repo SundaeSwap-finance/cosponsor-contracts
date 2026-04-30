@@ -71,7 +71,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "format": "prettier --write \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
-    "copy-to-ui": "bun run build && (rmdir /S /Q \"C:\\Users\\Mark\\Documents\\GitHub\\cosponsor-ui\\src\\lib\\cosponsor-sdk\" 2>nul || true) && xcopy /E /I /Y dist \"C:\\Users\\Mark\\Documents\\GitHub\\cosponsor-ui\\src\\lib\\cosponsor-sdk\" && xcopy /Y package.json \"C:\\Users\\Mark\\Documents\\GitHub\\cosponsor-ui\\src\\lib\\cosponsor-sdk\\\"",
+    "copy-to-ui": "bun run build && bun run dev/copy-to-ui.mjs",
     "configure": "bun run src/scripts/configure.ts",
     "deploy": "bun run src/scripts/deploy.ts",
     "deposit": "bun run src/scripts/deposit.ts",
