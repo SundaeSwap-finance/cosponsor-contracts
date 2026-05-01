@@ -1,13 +1,29 @@
 
-import {
-  Blaze,
-  Blockfrost,
-  CIP30Interface,
-  Core,
-  Provider,
-} from "@blaze-cardano/sdk";
+import { Blaze, Blockfrost, Core, Provider } from "@blaze-cardano/sdk";
 
 import { logger } from "../logger.js";
+
+/**
+ * Minimal CIP-30 wallet API shape this SDK actually uses.
+ *
+ * Defined locally rather than re-using @blaze-cardano/wallet's CIP30Interface
+ * because the upstream type narrows getUtxos/getCollateral to `string[] | undefined`,
+ * while @sundaeswap/wallet-lite (the de-facto consumer) types them as
+ * `string[] | null`. Both are valid per CIP-30; we accept both with `null | undefined`.
+ */
+export interface BrowserWalletApi {
+  getNetworkId(): Promise<number>;
+  getUtxos(): Promise<string[] | null | undefined>;
+  getCollateral?(): Promise<string[] | null | undefined>;
+  getChangeAddress(): Promise<string>;
+  getRewardAddresses(): Promise<string[]>;
+  signTx(tx: string, partialSign?: boolean): Promise<string>;
+  signData(
+    address: string,
+    payload: string,
+  ): Promise<{ signature: string; key: string }>;
+  submitTx(tx: string): Promise<string>;
+}
 // Ogmios purpose names to Blaze RedeemerTag mapping
 const ogmiosPurposeToTag: Record<string, number> = {
   spend: 0,
@@ -192,7 +208,7 @@ export async function createProvider(options?: BrowserProviderOptions) {
  * This wraps the browser wallet API (from wallet-lite) to work with Blaze
  */
 export function createCIP30Wallet(
-  walletApi: CIP30Interface,
+  walletApi: BrowserWalletApi,
   provider: Provider,
 ) {
   // Create a wallet implementation that Blaze can use
@@ -292,7 +308,7 @@ export function createCIP30Wallet(
  * Matches @sundaeswap/wallet-lite's WalletObserver without coupling to it.
  */
 export interface BrowserWalletObserver {
-  api: CIP30Interface;
+  api: BrowserWalletApi;
 }
 
 /**
