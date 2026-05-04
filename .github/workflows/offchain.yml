@@ -1,0 +1,59 @@
+name: CI/CD (Offchain)
+
+on:
+  push:
+    branches:
+      - main
+      - catalyst/milestone-2
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  Publish:
+    name: Build + Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          cd offchain
+          bun install --frozen-lockfile
+
+      - name: Format check
+        run: |
+          cd offchain
+          bun run format:check
+
+      - name: Build
+        run: |
+          cd offchain
+          bun run build
+
+      - name: Configure npm authentication
+        run: npm config set //registry.npmjs.org/:_authToken ${{ secrets.PUBLISH_NPM_TOKEN }}
+
+      - id: check
+        name: Check published version
+        uses: EndBug/version-check@v2
+        with:
+          file-name: ./offchain/package.json
+          file-url: https://unpkg.com/@sundaeswap/cosponsor-sdk@latest/package.json
+          static-checking: localIsNew
+
+      - name: Publish
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd offchain
+          npm publish
+
+      - name: Log Unchanged
+        if: steps.check.outputs.changed == 'false'
+        run: |
+          echo "Skipping publish because version is unchanged"
