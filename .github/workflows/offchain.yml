@@ -41,12 +41,17 @@ jobs:
 
       - id: check
         name: Check published version
-        uses: EndBug/version-check@v2
-        with:
-          file-name: ./offchain/package.json
-          file-url: https://unpkg.com/@sundaeswap/cosponsor-sdk@latest/package.json
-          static-checking: localIsNew
-          assume-same-version: old
+        run: |
+          cd offchain
+          LOCAL=$(jq -r .version package.json)
+          REMOTE=$(npm view @sundaeswap/cosponsor-sdk version 2>/dev/null || true)
+          echo "Local: $LOCAL"
+          echo "Remote: ${REMOTE:-<unpublished>}"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Publish
         if: steps.check.outputs.changed == 'true'
@@ -56,5 +61,4 @@ jobs:
 
       - name: Log Unchanged
         if: steps.check.outputs.changed == 'false'
-        run: |
-          echo "Skipping publish because version is unchanged"
+        run: echo "Skipping publish because version is unchanged"
