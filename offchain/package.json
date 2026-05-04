@@ -1,5 +1,5 @@
 {
-  "name": "@dezons/cosponsor-sdk",
+  "name": "@sundaeswap/cosponsor-sdk",
   "version": "1.0.0-alpha.1",
   "description": "Cosponsor SDK for Cardano smart contract interactions",
   "main": "dist/index.mjs",
