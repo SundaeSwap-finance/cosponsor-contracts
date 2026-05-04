@@ -373,7 +373,9 @@ const buildCredentialAsPlutusData = (
   if ("VerificationKeyCredential" in cred) {
     // Constructor 0
     fields.add(
-      PlutusData.newBytes(Buffer.from(cred.VerificationKeyCredential[0], "hex")),
+      PlutusData.newBytes(
+        Buffer.from(cred.VerificationKeyCredential[0], "hex"),
+      ),
     );
     return PlutusData.newConstrPlutusData(new ConstrPlutusData(0n, fields));
   } else {
@@ -743,7 +745,8 @@ export const buildConstitutionalCommitteeAsPlutusData = (
   for (const [cred, mandate] of entries) {
     const credContract = credentialToContract(cred);
     const credData = buildCredentialAsPlutusData(credContract);
-    const mandateBigInt = typeof mandate === "string" ? BigInt(mandate) : mandate;
+    const mandateBigInt =
+      typeof mandate === "string" ? BigInt(mandate) : mandate;
     const mandateData = PlutusData.newInteger(mandateBigInt);
     addedMap.insert(credData, mandateData);
   }

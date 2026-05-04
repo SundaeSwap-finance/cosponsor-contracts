@@ -1,4 +1,3 @@
-
 import { Core, makeValue, Blaze, Provider, Wallet } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
@@ -144,7 +143,10 @@ export const browserDeposit = async ({
   tx = tx.addReferenceInput(cosponsorReference);
 
   // Create the MDeposit redeemer
-  const mintRedeemer = serialize(CosponsorTypes.CosponsorMintRedeemer, "MDeposit");
+  const mintRedeemer = serialize(
+    CosponsorTypes.CosponsorMintRedeemer,
+    "MDeposit",
+  );
 
   // Extract proposal information for metadata
   const proposalUrlDecoded = Buffer.from(
@@ -197,7 +199,8 @@ export const browserDeposit = async ({
     );
 
     // SVG image
-    const svgImage = `data:image/svg+xml;base64,${Buffer.from(`
+    const svgImage = `data:image/svg+xml;base64,${Buffer.from(
+      `
       <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
         <rect width="100" height="100" fill="#1e40af"/>
         <text x="50" y="30" font-family="Arial" font-size="12" fill="white" text-anchor="middle">gADA</text>
@@ -205,7 +208,8 @@ export const browserDeposit = async ({
         <text x="50" y="70" font-family="Arial" font-size="8" fill="#dbeafe" text-anchor="middle">Governance</text>
         <text x="50" y="85" font-family="Arial" font-size="8" fill="#dbeafe" text-anchor="middle">Token</text>
       </svg>
-    `).toString("base64")}`;
+    `,
+    ).toString("base64")}`;
 
     tokenMetadataMap.insert(
       Core.Metadatum.newText("image"),
@@ -310,7 +314,11 @@ export const browserDeposit = async ({
 
   // Lock assets at the cosponsor script address
   // TxBuilder is immutable - reassign after each operation
-  tx = tx.lockAssets(cosponsorScriptAddress, makeValue(depositAmount), datumData);
+  tx = tx.lockAssets(
+    cosponsorScriptAddress,
+    makeValue(depositAmount),
+    datumData,
+  );
   tx = tx.setChangeAddress(await blaze.wallet.getChangeAddress());
 
   // Return the incomplete TxBuilder - following the pattern from cosponsor-contracts

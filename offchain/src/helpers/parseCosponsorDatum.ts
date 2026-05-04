@@ -38,9 +38,11 @@ export const parseCosponsorDatum = (
             url: cosponsoredProposal.anchor.url,
             hash: cosponsoredProposal.anchor.hash,
           },
-          action: cosponsoredProposal.procedure?.governanceAction || {
-            kind: "Unknown",
-          } as TGovernanceAction,
+          action:
+            cosponsoredProposal.procedure?.governanceAction ||
+            ({
+              kind: "Unknown",
+            } as TGovernanceAction),
         };
 
         return {

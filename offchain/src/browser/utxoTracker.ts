@@ -1,4 +1,3 @@
-
 import { Core } from "@blaze-cardano/sdk";
 
 import { logger } from "../logger.js";
@@ -30,7 +29,10 @@ class PendingUtxoTracker {
   recordTransaction(
     submittedTxHash: string,
     spentInputs: { txHash: string; outputIndex: number }[],
-    createdOutputs: { outputIndex: number; utxo: Core.TransactionUnspentOutput }[],
+    createdOutputs: {
+      outputIndex: number;
+      utxo: Core.TransactionUnspentOutput;
+    }[],
   ) {
     logger.debug(`📝 Recording tx ${submittedTxHash.slice(0, 16)}... effects:`);
     logger.debug(`   - ${spentInputs.length} UTxO(s) spent`);
@@ -47,10 +49,13 @@ class PendingUtxoTracker {
       // Remove from createdUtxos if this was a pending UTxO we were tracking
       const beforeCount = this.createdUtxos.length;
       this.createdUtxos = this.createdUtxos.filter(
-        (c) => !(c.txHash === input.txHash && c.outputIndex === input.outputIndex),
+        (c) =>
+          !(c.txHash === input.txHash && c.outputIndex === input.outputIndex),
       );
       if (this.createdUtxos.length < beforeCount) {
-        logger.debug(`   🔄 Removed spent pending UTxO: ${input.txHash.slice(0, 16)}...#${input.outputIndex}`);
+        logger.debug(
+          `   🔄 Removed spent pending UTxO: ${input.txHash.slice(0, 16)}...#${input.outputIndex}`,
+        );
       }
     }
 
@@ -58,7 +63,8 @@ class PendingUtxoTracker {
     // Avoid duplicates (can happen with React strict mode double-invoke)
     for (const output of createdOutputs) {
       const alreadyTracked = this.createdUtxos.some(
-        (c) => c.txHash === submittedTxHash && c.outputIndex === output.outputIndex,
+        (c) =>
+          c.txHash === submittedTxHash && c.outputIndex === output.outputIndex,
       );
       if (!alreadyTracked) {
         this.createdUtxos.push({
@@ -98,7 +104,9 @@ class PendingUtxoTracker {
       const outputIndex = Number(utxo.input().index());
       const spent = this.isSpent(txHash, outputIndex);
       if (spent) {
-        logger.debug(`   🔄 Excluding spent UTxO: ${txHash.slice(0, 16)}...#${outputIndex}`);
+        logger.debug(
+          `   🔄 Excluding spent UTxO: ${txHash.slice(0, 16)}...#${outputIndex}`,
+        );
       }
       return !spent;
     });
@@ -120,15 +128,21 @@ class PendingUtxoTracker {
       if (!existingIds.has(id)) {
         newPending.push(tracked.utxo);
         existingIds.add(id); // Prevent duplicates within pending list too
-        logger.debug(`   🔄 Adding pending UTxO: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
+        logger.debug(
+          `   🔄 Adding pending UTxO: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`,
+        );
       } else {
         // UTxO is already in the list (tx was confirmed), remove from tracking
-        logger.debug(`   ✅ Pending UTxO already confirmed: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
+        logger.debug(
+          `   ✅ Pending UTxO already confirmed: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`,
+        );
       }
     }
 
     const result = [...filtered, ...newPending];
-    logger.debug(`   📋 Final UTxO count: ${result.length} (${filtered.length} from provider + ${newPending.length} pending)`);
+    logger.debug(
+      `   📋 Final UTxO count: ${result.length} (${filtered.length} from provider + ${newPending.length} pending)`,
+    );
     return result;
   }
 
@@ -189,7 +203,10 @@ export function extractTransactionEffects(
   // Get created outputs - ONLY track script outputs (those with datums)
   // Wallet outputs should not be tracked as they can't be spent with redeemers
   const outputs = body.outputs();
-  const createdOutputs: { outputIndex: number; utxo: Core.TransactionUnspentOutput }[] = [];
+  const createdOutputs: {
+    outputIndex: number;
+    utxo: Core.TransactionUnspentOutput;
+  }[] = [];
 
   for (let i = 0; i < outputs.length; i++) {
     const output = outputs[i];

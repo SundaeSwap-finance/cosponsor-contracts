@@ -1,4 +1,3 @@
-
 import { Blaze, Core, Provider, Wallet } from "@blaze-cardano/sdk";
 import { parse, serialize } from "@blaze-cardano/data";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
@@ -327,7 +326,9 @@ const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
 /**
  * Parse anchor URL and hash from datum CBOR
  */
-const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => {
+const parseAnchorFromCbor = (
+  cborHex: string,
+): { url: string; hash: string } => {
   try {
     const reader = new CborReader(cborHex);
 
@@ -385,7 +386,9 @@ const parseAnchorFromCbor = (cborHex: string): { url: string; hash: string } => 
  * The gADA token asset name is computed as:
  *   serialize(CosponsorTypes.CosponsoredProposalProcedure, proposal).hash()
  */
-const computeProposalHashFromDatum = (datumPlutusData: Core.PlutusData): string => {
+const computeProposalHashFromDatum = (
+  datumPlutusData: Core.PlutusData,
+): string => {
   try {
     // Parse the datum using the same schema used when creating it
     const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
@@ -439,7 +442,9 @@ const computeProposalHashFromDatum = (datumPlutusData: Core.PlutusData): string 
 /**
  * Extract governance action kind from parsed datum
  */
-const extractActionKindFromDatum = (datumPlutusData: Core.PlutusData): string => {
+const extractActionKindFromDatum = (
+  datumPlutusData: Core.PlutusData,
+): string => {
   try {
     const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
 
@@ -588,7 +593,8 @@ export const fetchWithdrawalPlan = async (
       // Check if this is a gADA token (matches our policy ID)
       if (assetId.startsWith(gAdaPolicyId)) {
         const assetName = assetId.substring(56); // Remove policy ID prefix (56 chars)
-        const tokenAmount = typeof amount === "bigint" ? amount : BigInt(amount);
+        const tokenAmount =
+          typeof amount === "bigint" ? amount : BigInt(amount);
         const current = tokenMap.get(assetName) || 0n;
         tokenMap.set(assetName, current + tokenAmount);
       }
@@ -614,14 +620,17 @@ export const fetchWithdrawalPlan = async (
   logger.debug(`Script address: ${cosponsorScriptAddress.toBech32()}`);
 
   // Get UTxOs from provider
-  let rawScriptUtxos =
-    await blaze.provider.getUnspentOutputs(cosponsorScriptAddress);
+  let rawScriptUtxos = await blaze.provider.getUnspentOutputs(
+    cosponsorScriptAddress,
+  );
 
   // Apply pending transaction tracking (for tx chaining)
   const { pendingUtxoTracker } = await import("./utxoTracker.js");
   const stats = pendingUtxoTracker.getStats();
   if (stats.spentCount > 0 || stats.pendingCount > 0) {
-    logger.debug(`🔄 Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`);
+    logger.debug(
+      `🔄 Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`,
+    );
     rawScriptUtxos = pendingUtxoTracker.applyToUtxoList(rawScriptUtxos);
   }
 
@@ -682,7 +691,10 @@ export const fetchWithdrawalPlan = async (
   // Sort by locked amount descending (biggest first)
   scriptUtxos.sort((a, b) => (b.lockedAmount > a.lockedAmount ? 1 : -1));
 
-  const totalScriptAda = scriptUtxos.reduce((sum, u) => sum + u.lockedAmount, 0n);
+  const totalScriptAda = scriptUtxos.reduce(
+    (sum, u) => sum + u.lockedAmount,
+    0n,
+  );
 
   logger.debug(
     `Found ${scriptUtxos.length} script UTxO(s), total: ${totalScriptAda / 1_000_000n} ADA`,

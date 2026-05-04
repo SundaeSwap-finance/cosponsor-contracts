@@ -1,4 +1,3 @@
-
 import { Core, makeValue, Blaze, Provider, Wallet } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
@@ -261,9 +260,7 @@ export const browserWithdraw = async ({
     paymentCredential &&
     paymentCredential.type === Core.CredentialType.KeyHash
   ) {
-    tx = tx.addRequiredSigner(
-      Core.Ed25519KeyHashHex(paymentCredential.hash),
-    );
+    tx = tx.addRequiredSigner(Core.Ed25519KeyHashHex(paymentCredential.hash));
     logger.debug(
       `✍️ Added required signer: ${paymentCredential.hash.slice(0, 16)}...`,
     );
@@ -292,7 +289,9 @@ export const browserWithdraw = async ({
     // Get the datum from the first selected UTxO (they all have the same proposal key)
     const firstUtxoDatum = selectedUtxos[0].utxo.output().datum();
     if (!firstUtxoDatum) {
-      throw new Error("Selected UTxO has no datum - cannot create change output");
+      throw new Error(
+        "Selected UTxO has no datum - cannot create change output",
+      );
     }
 
     // Send excess back to script with original datum.

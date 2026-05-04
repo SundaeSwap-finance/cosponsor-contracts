@@ -20,10 +20,7 @@ export {
   selectUtxosForWithdrawal,
   fetchUserDeposits,
 } from "./fetchUserDeposits.js";
-export type {
-  IUserGadaBalance,
-  IUserDeposit,
-} from "./fetchUserDeposits.js";
+export type { IUserGadaBalance, IUserDeposit } from "./fetchUserDeposits.js";
 
 // Browser provider utilities
 export {

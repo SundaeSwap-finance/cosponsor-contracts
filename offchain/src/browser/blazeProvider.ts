@@ -1,4 +1,3 @@
-
 import { Blaze, Blockfrost, Core, Provider } from "@blaze-cardano/sdk";
 
 import { logger } from "../logger.js";
@@ -111,7 +110,8 @@ export function createOgmiosEvaluator(ogmiosUrl: string): Core.Evaluator {
           }
 
           for (const evaluation of evaluations as OgmiosEvaluation[]) {
-            const purpose = ogmiosPurposeToTag[evaluation.validator?.purpose ?? ""] ?? 0;
+            const purpose =
+              ogmiosPurposeToTag[evaluation.validator?.purpose ?? ""] ?? 0;
             const index = BigInt(evaluation.validator?.index ?? 0);
 
             // Find matching redeemer
