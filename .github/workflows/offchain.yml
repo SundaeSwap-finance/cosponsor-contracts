@@ -46,6 +46,7 @@ jobs:
           file-name: ./offchain/package.json
           file-url: https://unpkg.com/@sundaeswap/cosponsor-sdk@latest/package.json
           static-checking: localIsNew
+          assume-same-version: old
 
       - name: Publish
         if: steps.check.outputs.changed == 'true'
