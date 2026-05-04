@@ -36,9 +36,6 @@ jobs:
           cd offchain
           bun run build
 
-      - name: Configure npm authentication
-        run: npm config set //registry.npmjs.org/:_authToken ${{ secrets.PUBLISH_NPM_TOKEN }}
-
       - id: check
         name: Check published version
         run: |
@@ -52,12 +49,16 @@ jobs:
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PUBLISH_NPM_TOKEN }}
 
       - name: Publish
         if: steps.check.outputs.changed == 'true'
         run: |
           cd offchain
           npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PUBLISH_NPM_TOKEN }}
 
       - name: Log Unchanged
         if: steps.check.outputs.changed == 'false'
