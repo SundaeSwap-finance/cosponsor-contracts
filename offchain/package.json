@@ -46,6 +46,9 @@
   ],
   "license": "MIT",
   "author": "SundaeSwap Labs",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/SundaeSwap-finance/cosponsor-contracts.git",
