@@ -1,0 +1,32 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "include": [
+    "./src/index.ts",
+    "./src/Config.ts",
+    "./src/transactions/**/*",
+    "./src/utils/**/*",
+    "./src/validators/**/*"
+  ],
+  "exclude": [
+    "./src/scripts/**/*",
+    "./src/helpers/**/*",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "./test-*.ts"
+  ]
+}

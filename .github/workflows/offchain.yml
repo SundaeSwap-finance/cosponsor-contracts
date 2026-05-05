@@ -1,0 +1,65 @@
+name: CI/CD (Offchain)
+
+on:
+  push:
+    branches:
+      - main
+      - catalyst/milestone-2
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  Publish:
+    name: Build + Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          cd offchain
+          bun install --frozen-lockfile
+
+      - name: Format check
+        run: |
+          cd offchain
+          bun run format:check
+
+      - name: Build
+        run: |
+          cd offchain
+          bun run build
+
+      - id: check
+        name: Check published version
+        run: |
+          cd offchain
+          LOCAL=$(jq -r .version package.json)
+          REMOTE=$(npm view @sundaeswap/cosponsor-sdk version 2>/dev/null || true)
+          echo "Local: $LOCAL"
+          echo "Remote: ${REMOTE:-<unpublished>}"
+          if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PUBLISH_NPM_TOKEN }}
+
+      - name: Publish
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd offchain
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PUBLISH_NPM_TOKEN }}
+
+      - name: Log Unchanged
+        if: steps.check.outputs.changed == 'false'
+        run: echo "Skipping publish because version is unchanged"

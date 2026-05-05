@@ -1,0 +1,111 @@
+{
+  "name": "@sundaeswap/cosponsor-sdk",
+  "version": "0.0.1",
+  "description": "Cosponsor SDK for Cardano smart contract interactions",
+  "main": "dist/index.mjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    },
+    "./browser": {
+      "import": "./dist/browser/index.mjs",
+      "types": "./dist/browser/index.d.mts"
+    },
+    "./transactions": {
+      "import": "./dist/transactions/index.mjs",
+      "types": "./dist/transactions/index.d.mts"
+    },
+    "./validators": {
+      "import": "./dist/validators/index.mjs",
+      "types": "./dist/validators/index.d.mts"
+    },
+    "./validators/Types": {
+      "import": "./dist/validators/Types/index.mjs",
+      "types": "./dist/validators/Types/index.d.mts"
+    },
+    "./validators/GeneratedTypes": {
+      "import": "./dist/validators/GeneratedTypes/index.mjs",
+      "types": "./dist/validators/GeneratedTypes/index.d.mts"
+    },
+    "./utils": {
+      "import": "./dist/utils/index.mjs",
+      "types": "./dist/utils/index.d.mts"
+    }
+  },
+  "keywords": [
+    "cardano",
+    "smart-contracts",
+    "cosponsor",
+    "sdk",
+    "blockchain",
+    "defi"
+  ],
+  "license": "MIT",
+  "author": "SundaeSwap Labs",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SundaeSwap-finance/cosponsor-contracts.git",
+    "directory": "offchain"
+  },
+  "homepage": "https://github.com/SundaeSwap-finance/cosponsor-contracts#readme",
+  "bugs": {
+    "url": "https://github.com/SundaeSwap-finance/cosponsor-contracts/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "build:watch": "tsdown --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "bun run clean && bun run build",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "format": "prettier --write \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
+    "copy-to-ui": "bun run build && bun run dev/copy-to-ui.mjs",
+    "configure": "bun run src/scripts/configure.ts",
+    "deploy": "bun run src/scripts/deploy.ts",
+    "deposit": "bun run src/scripts/deposit.ts",
+    "withdrawal": "bun run src/scripts/withdrawal.ts",
+    "withdraw-all": "bun run src/scripts/withdraw-all.ts",
+    "mint-state-nft": "bun run src/scripts/mint-state-nft.ts",
+    "generate-script-cbor": "bun run src/scripts/generate-script-cbor.ts",
+    "inspect-deposit": "bun run src/helpers/inspect-deposit.ts",
+    "fetch-submissions": "bun run src/helpers/fetch-submissions.ts",
+    "index-deposits": "bun run src/helpers/depositIndexer.ts"
+  },
+  "devDependencies": {
+    "@sundaeswap/prettier-config": "latest",
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.1",
+    "prettier": "^3.0.0",
+    "tsdown": "^0.20.0-beta.3",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@blaze-cardano/core": "^0.7.0",
+    "@blaze-cardano/data": "^0.6.4",
+    "@blaze-cardano/ogmios": "^0.0.7",
+    "@blaze-cardano/sdk": "^0.2.43",
+    "@blaze-cardano/uplc": "^0.3.2",
+    "@scure/bip39": "^2.0.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.3"
+  }
+}
