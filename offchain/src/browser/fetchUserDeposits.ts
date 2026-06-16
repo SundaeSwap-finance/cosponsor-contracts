@@ -1,520 +1,552 @@
 import { Blaze, Core, Provider, Wallet } from "@blaze-cardano/sdk";
 import { parse, serialize } from "@blaze-cardano/data";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
+import { getCosponsorScriptAddress } from "./scriptAddress.js";
 import { CosponsorTypes } from "../validators/GeneratedTypes/index.js";
+import type { ICosponsoredProposal } from "../validators/Cosponsor.js";
+import type {
+  IGovernanceActionId,
+  TGovernanceAction,
+} from "../validators/Types/GovernanceAction.js";
+import type { TCredential } from "../validators/Types/Credential.js";
+import { computeProposalAssetName } from "../validators/Types/GovernanceAction.js";
+import { extractInlineDatum } from "../helpers/datumUtils.js";
 
 import { logger } from "../logger.js";
-/**
- * Map governance action constructor index to kind string
- * Must match Aiken on-chain enum order
- */
-const GOVERNANCE_ACTION_KINDS: Record<number, string> = {
-  0: "ProtocolParameters",
-  1: "HardFork",
-  2: "TreasuryWithdrawal",
-  3: "NoConfidence",
-  4: "ConstitutionalCommittee",
-  5: "NewConstitution",
-  6: "NicePoll",
-};
+
+// Each datum-extraction helper distinguishes three states explicitly:
+//   - Parse succeeded and the datum is a `Before { cosponsored }` → return the
+//     value.
+//   - Parse succeeded but the datum is `After` (proposal already processed) →
+//     return `null`. Callers can present this as "no proposal data".
+//   - Parse threw or the datum is structurally unexpected → return `null` AND
+//     the helper logs the reason. Pre-audit code returned `""` /
+//     `{ url:"", hash:"" }` / `"Unknown"` in this case, making it impossible
+//     for callers to tell "successfully decoded as After" apart from "decode
+//     failed". Returning `null` everywhere puts the caller in charge of the
+//     fallback policy.
+
+/** The result type of `parse(CosponsorTypes.CosponsorDatum, …)`. */
+type TParsedCosponsorDatum = ReturnType<
+  typeof parse<typeof CosponsorTypes.CosponsorDatum>
+>;
 
 /**
- * Simple CBOR decoder for navigating Plutus Data structures
- * Only handles what we need: tags, arrays, integers, and byte strings
+ * Parse a raw datum into a `CosponsorDatum`, returning `null` (with a
+ * context-tagged warn log) when the parse throws. Shared by every extractor
+ * so a script UTxO's datum is CBOR-deserialized ONCE per scan instead of
+ * once per extractor (it was 4× per UTxO before this helper existed).
  */
-class CborReader {
-  private data: Uint8Array;
-  private pos: number;
-
-  constructor(hex: string) {
-    this.data = new Uint8Array(
-      hex.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)),
-    );
-    this.pos = 0;
-  }
-
-  /**
-   * Get current position in the byte array
-   */
-  getPosition(): number {
-    return this.pos;
-  }
-
-  /**
-   * Extract bytes from start to end position as hex string
-   */
-  extractHex(start: number, end: number): string {
-    return Array.from(this.data.slice(start, end))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
-  private readByte(): number {
-    return this.data[this.pos++];
-  }
-
-  private peekByte(): number {
-    return this.data[this.pos];
-  }
-
-  private readUint(additionalInfo: number): number {
-    if (additionalInfo < 24) {
-      return additionalInfo;
-    }
-    if (additionalInfo === 24) {
-      return this.readByte();
-    }
-    if (additionalInfo === 25) {
-      return (this.readByte() << 8) | this.readByte();
-    }
-    if (additionalInfo === 26) {
-      return (
-        (this.readByte() << 24) |
-        (this.readByte() << 16) |
-        (this.readByte() << 8) |
-        this.readByte()
-      );
-    }
-    if (additionalInfo === 31) {
-      // Indefinite length - return -1 as sentinel
-      return -1;
-    }
-    throw new Error(`Unsupported additional info: ${additionalInfo}`);
-  }
-
-  /**
-   * Check if next byte is the CBOR break code (0xff)
-   */
-  isBreak(): boolean {
-    return this.peekByte() === 0xff;
-  }
-
-  /**
-   * Consume the break byte (0xff) for indefinite-length structures
-   */
-  readBreak(): void {
-    const byte = this.readByte();
-    if (byte !== 0xff) {
-      throw new Error(`Expected break (0xff), got ${byte.toString(16)}`);
-    }
-  }
-
-  /**
-   * Read a CBOR tag and return the tag number
-   */
-  readTag(): number | null {
-    const byte = this.peekByte();
-    const majorType = byte >> 5;
-    if (majorType !== 6) {
-      return null;
-    } // Not a tag
-    this.readByte();
-    const additionalInfo = byte & 0x1f;
-    return this.readUint(additionalInfo);
-  }
-
-  /**
-   * Read array length
-   */
-  readArrayLength(): number {
-    const byte = this.readByte();
-    const majorType = byte >> 5;
-    if (majorType !== 4) {
-      throw new Error(`Expected array, got major type ${majorType}`);
-    }
-    const additionalInfo = byte & 0x1f;
-    return this.readUint(additionalInfo);
-  }
-
-  /**
-   * Skip over a CBOR value (any type)
-   */
-  skipValue(): void {
-    const byte = this.readByte();
-    const majorType = byte >> 5;
-    const additionalInfo = byte & 0x1f;
-
-    switch (majorType) {
-      case 0: // Unsigned integer
-      case 1: // Negative integer
-        this.readUint(additionalInfo);
-        break;
-      case 2: // Byte string
-      case 3: {
-        // Text string
-        const len = this.readUint(additionalInfo);
-        if (len >= 0) {
-          this.pos += len;
-        }
-        // Note: indefinite-length strings not supported yet
-        break;
-      }
-      case 4: {
-        // Array
-        const arrLen = this.readUint(additionalInfo);
-        if (arrLen === -1) {
-          // Indefinite-length array - read until break
-          while (!this.isBreak()) {
-            this.skipValue();
-          }
-          this.readBreak();
-        } else {
-          for (let i = 0; i < arrLen; i++) {
-            this.skipValue();
-          }
-        }
-        break;
-      }
-      case 5: {
-        // Map
-        const mapLen = this.readUint(additionalInfo);
-        if (mapLen === -1) {
-          // Indefinite-length map - read until break
-          while (!this.isBreak()) {
-            this.skipValue(); // key
-            this.skipValue(); // value
-          }
-          this.readBreak();
-        } else {
-          for (let i = 0; i < mapLen * 2; i++) {
-            this.skipValue();
-          }
-        }
-        break;
-      }
-      case 6: // Tag
-        this.readUint(additionalInfo);
-        this.skipValue();
-        break;
-      case 7: // Simple/float/break
-        if (additionalInfo < 24) {
-          break;
-        }
-        if (additionalInfo === 24) {
-          this.pos += 1;
-          break;
-        }
-        if (additionalInfo === 25) {
-          this.pos += 2;
-          break;
-        }
-        if (additionalInfo === 26) {
-          this.pos += 4;
-          break;
-        }
-        if (additionalInfo === 27) {
-          this.pos += 8;
-          break;
-        }
-        // additionalInfo === 31 is break, handled elsewhere
-        break;
-    }
-  }
-
-  /**
-   * Read a byte string and return as hex
-   */
-  readByteString(): string {
-    const byte = this.readByte();
-    const majorType = byte >> 5;
-    if (majorType !== 2) {
-      throw new Error(`Expected byte string, got major type ${majorType}`);
-    }
-    const additionalInfo = byte & 0x1f;
-    const len = this.readUint(additionalInfo);
-    const bytes = this.data.slice(this.pos, this.pos + len);
-    this.pos += len;
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-  }
-}
-
-/**
- * Parse the governance action kind from datum CBOR
- *
- * Datum structure (navigating via CBOR tags):
- * - Tag 121 (Constructor 0): CosponsorDatum::Before
- *   - Array[1]: [CosponsoredProposalProcedure]
- *     - Tag 121 (Constructor 0): CosponsoredProposalProcedure
- *       - Array[2]: [ProposalProcedure, Anchor]
- *         - Tag 121 (Constructor 0): ProposalProcedure
- *           - Array[3]: [deposit, returnAddress, governanceAction]
- *             - governanceAction: Tag 121-127 (Constructor 0-6)
- *
- * CBOR tags for Plutus constructors 0-6: 121-127
- */
-const parseGovernanceActionKindFromCbor = (cborHex: string): string => {
-  try {
-    const reader = new CborReader(cborHex);
-
-    // CosponsorDatum - tag 121 = Before (has data), tag 122 = After (no data)
-    const datumTag = reader.readTag();
-    logger.debug("🔍 CBOR Parse: datumTag =", datumTag);
-    if (datumTag === 122) {
-      // CosponsorDatum::After - deposit has been processed, no proposal data
-      logger.debug("🔍 CBOR Parse: Datum is After (processed), no action data");
-      return "Processed";
-    }
-    if (datumTag !== 121) {
-      logger.debug("🔍 CBOR Parse: Expected tag 121 or 122, got", datumTag);
-      return "Unknown";
-    } // Not CosponsorDatum::Before
-
-    // Array with 1 element (CosponsoredProposalProcedure)
-    // -1 means indefinite-length array, which is valid
-    const datumLen = reader.readArrayLength();
-    logger.debug("🔍 CBOR Parse: datumLen =", datumLen);
-    if (datumLen === 0) {
-      return "Unknown";
-    }
-
-    // CosponsoredProposalProcedure - should be tag 121 (constructor 0)
-    const cppTag = reader.readTag();
-    logger.debug("🔍 CBOR Parse: cppTag =", cppTag);
-    if (cppTag !== 121) {
-      return "Unknown";
-    }
-
-    // Array with 2 elements [ProposalProcedure, Anchor]
-    // -1 means indefinite-length array, which is valid
-    const cppLen = reader.readArrayLength();
-    logger.debug("🔍 CBOR Parse: cppLen =", cppLen);
-    if (cppLen === 0) {
-      return "Unknown";
-    }
-
-    // ProposalProcedure - should be tag 121 (constructor 0)
-    const ppTag = reader.readTag();
-    logger.debug("🔍 CBOR Parse: ppTag =", ppTag);
-    if (ppTag !== 121) {
-      return "Unknown";
-    }
-
-    // Array with 3 elements [deposit, returnAddress, governanceAction]
-    // -1 means indefinite-length array, which is valid
-    const ppLen = reader.readArrayLength();
-    logger.debug("🔍 CBOR Parse: ppLen =", ppLen);
-    if (ppLen === 0) {
-      return "Unknown";
-    }
-
-    // Skip deposit (integer)
-    reader.skipValue();
-
-    // Skip returnAddress (constructor with credential)
-    reader.skipValue();
-
-    // governanceAction - tag 121-127 indicates constructor 0-6
-    const actionTag = reader.readTag();
-    logger.debug("🔍 CBOR Parse: actionTag =", actionTag);
-    if (actionTag === null || actionTag < 121 || actionTag > 127) {
-      return "Unknown";
-    }
-
-    const actionIndex = actionTag - 121;
-    const actionKind =
-      GOVERNANCE_ACTION_KINDS[actionIndex] || `Unknown (${actionIndex})`;
-    logger.debug("🔍 CBOR Parse: SUCCESS! actionKind =", actionKind);
-    return actionKind;
-  } catch (error) {
-    logger.warn("Failed to parse governance action from CBOR:", error);
-    return "Unknown";
-  }
-};
-
-/**
- * Parse anchor URL and hash from datum CBOR
- */
-const parseAnchorFromCbor = (
-  cborHex: string,
-): { url: string; hash: string } => {
-  try {
-    const reader = new CborReader(cborHex);
-
-    // Navigate to Anchor (same path as above, but read second element of CosponsoredProposalProcedure)
-    const datumTag = reader.readTag();
-    if (datumTag !== 121) {
-      return { url: "", hash: "" };
-    }
-
-    // -1 means indefinite-length array, which is valid
-    reader.readArrayLength();
-
-    const cppTag = reader.readTag();
-    if (cppTag !== 121) {
-      return { url: "", hash: "" };
-    }
-
-    // -1 means indefinite-length array, which is valid
-    const cppLen = reader.readArrayLength();
-    if (cppLen === 0) {
-      return { url: "", hash: "" };
-    }
-
-    // Skip ProposalProcedure
-    reader.skipValue();
-
-    // Anchor - should be tag 121 (constructor 0)
-    const anchorTag = reader.readTag();
-    if (anchorTag !== 121) {
-      return { url: "", hash: "" };
-    }
-
-    // -1 means indefinite-length array, which is valid
-    const anchorLen = reader.readArrayLength();
-    if (anchorLen === 0) {
-      return { url: "", hash: "" };
-    }
-
-    // Read URL (byte string)
-    const url = reader.readByteString();
-    // Read hash (byte string)
-    const hash = reader.readByteString();
-
-    return { url, hash };
-  } catch (error) {
-    logger.warn("Failed to parse anchor from CBOR:", error);
-    return { url: "", hash: "" };
-  }
-};
-
-/**
- * Compute the proposal hash from a PlutusData datum
- * Uses the same serialize() function as when tokens are minted to ensure matching hashes
- *
- * The gADA token asset name is computed as:
- *   serialize(CosponsorTypes.CosponsoredProposalProcedure, proposal).hash()
- */
-const computeProposalHashFromDatum = (
+const parseCosponsorDatumData = (
   datumPlutusData: Core.PlutusData,
-): string => {
+  context: string,
+): TParsedCosponsorDatum | null => {
   try {
-    // Parse the datum using the same schema used when creating it
-    const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+    return parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+  } catch (error) {
+    logger.warn(`${context}: parse failed`, error);
+    return null;
+  }
+};
 
-    if (!parsedDatum) {
-      logger.debug("🔍 parse() returned null/undefined for datum");
-      return "";
-    }
+/**
+ * Narrow a parsed datum to its `Before.cosponsored` payload. Returns `null`
+ * for `After`-state datums and unexpected shapes.
+ */
+const cosponsoredFromParsed = (parsedDatum: TParsedCosponsorDatum) =>
+  typeof parsedDatum === "object" &&
+  parsedDatum !== null &&
+  "Before" in parsedDatum &&
+  parsedDatum.Before &&
+  "cosponsored" in parsedDatum.Before
+    ? parsedDatum.Before.cosponsored
+    : null;
 
-    // Check for "After" datum first
-    if (parsedDatum === "After") {
-      logger.debug("🔍 Datum is After (processed proposal)");
-      return "";
-    }
+type TParsedCosponsored = NonNullable<ReturnType<typeof cosponsoredFromParsed>>;
 
-    if (typeof parsedDatum !== "object") {
-      logger.debug("🔍 parsedDatum is not an object:", typeof parsedDatum);
-      return "";
-    }
+/** Serialize + hash an already-parsed cosponsored procedure (asset name). */
+const proposalHashFromCosponsored = (
+  cosponsored: TParsedCosponsored,
+): string | null => {
+  try {
+    return serialize(
+      CosponsorTypes.CosponsoredProposalProcedure,
+      cosponsored,
+    ).hash();
+  } catch (error) {
+    logger.warn("computeProposalHashFromDatum: re-serialize failed", error);
+    return null;
+  }
+};
 
-    // Check if it's a "Before" datum with cosponsored proposal
-    if (
-      "Before" in parsedDatum &&
-      parsedDatum.Before &&
-      "cosponsored" in parsedDatum.Before
-    ) {
-      const cosponsoredProposal = parsedDatum.Before.cosponsored;
+/** Governance-action kind of an already-parsed cosponsored procedure. */
+const actionKindFromCosponsored = (
+  cosponsored: TParsedCosponsored,
+): string | null => {
+  const govAction = cosponsored.procedure?.governanceAction;
+  if (!govAction) return null;
+  if (typeof govAction === "string") {
+    return govAction; // "NicePoll"
+  }
+  if (typeof govAction === "object") {
+    const keys = Object.keys(govAction);
+    return keys[0] ?? null;
+  }
+  return null;
+};
 
-      // Re-serialize using the same function that was used during minting
-      // This ensures the CBOR encoding is identical
-      const serialized = serialize(
-        CosponsorTypes.CosponsoredProposalProcedure,
-        cosponsoredProposal,
-      );
+/** Anchor of an already-parsed cosponsored procedure. */
+const anchorFromCosponsored = (
+  cosponsored: TParsedCosponsored,
+): { url: string; hash: string } | null => {
+  const anchor = cosponsored.anchor;
+  if (!anchor) return null;
+  return {
+    url: anchor.url ?? "",
+    hash: anchor.hash ?? "",
+  };
+};
 
-      const proposalHash = serialized.hash();
-      return proposalHash;
-    }
+/**
+ * Compute the proposal hash from a PlutusData datum.
+ *
+ * The gADA token asset name is `serialize(CosponsorTypes.CosponsoredProposalProcedure, proposal).hash()`,
+ * so this function is also the canonical asset-name computation for the SDK.
+ *
+ * Returns `null` when the datum is `After` (no proposal procedure to hash) or
+ * when parse/serialize threw. The `null` return is meaningful: a caller that
+ * stored it in a Map keyed by asset name should skip storage rather than use
+ * an empty string as a sentinel (the pre-audit behaviour collapsed every
+ * unparseable UTxO under the same `""` key).
+ */
+export const computeProposalHashFromDatum = (
+  datumPlutusData: Core.PlutusData,
+): string | null => {
+  const parsedDatum = parseCosponsorDatumData(
+    datumPlutusData,
+    "computeProposalHashFromDatum",
+  );
+  if (parsedDatum === null) return null;
 
+  if (parsedDatum === "After") {
+    logger.debug("computeProposalHashFromDatum: After-state datum");
+    return null;
+  }
+
+  const cosponsored = cosponsoredFromParsed(parsedDatum);
+  if (!cosponsored) {
     logger.debug(
-      "🔍 Datum structure unexpected, keys:",
-      Object.keys(parsedDatum),
+      "computeProposalHashFromDatum: unexpected datum shape",
+      typeof parsedDatum === "object" && parsedDatum !== null
+        ? Object.keys(parsedDatum)
+        : typeof parsedDatum,
     );
-    return "";
-  } catch (error) {
-    logger.warn("Failed to compute proposal hash from datum:", error);
-    return "";
+    return null;
   }
+
+  return proposalHashFromCosponsored(cosponsored);
 };
 
 /**
- * Extract governance action kind from parsed datum
+ * Extract governance action kind from a parsed datum.
+ *
+ * Returns `null` for `After`-state datums and for any failure. Pre-audit
+ * code returned `"Unknown"`, indistinguishable from a real Unknown kind.
  */
-const extractActionKindFromDatum = (
+export const extractActionKindFromDatum = (
   datumPlutusData: Core.PlutusData,
-): string => {
-  try {
-    const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+): string | null => {
+  const parsedDatum = parseCosponsorDatumData(
+    datumPlutusData,
+    "extractActionKindFromDatum",
+  );
+  if (parsedDatum === null || parsedDatum === "After") return null;
 
-    if (!parsedDatum || typeof parsedDatum !== "object") {
-      return "Unknown";
-    }
+  const cosponsored = cosponsoredFromParsed(parsedDatum);
+  if (!cosponsored) return null;
 
-    if (
-      "Before" in parsedDatum &&
-      parsedDatum.Before &&
-      "cosponsored" in parsedDatum.Before
-    ) {
-      const govAction =
-        parsedDatum.Before.cosponsored.procedure?.governanceAction;
-      if (!govAction) return "Unknown";
-
-      // The governance action is a union type - extract the kind from the object key
-      if (typeof govAction === "string") {
-        return govAction; // e.g., "NicePoll"
-      }
-      if (typeof govAction === "object") {
-        const keys = Object.keys(govAction);
-        if (keys.length > 0) {
-          return keys[0]; // e.g., "TreasuryWithdrawal", "HardFork", etc.
-        }
-      }
-      return "Unknown";
-    }
-
-    if (parsedDatum === "After") {
-      return "Processed";
-    }
-
-    return "Unknown";
-  } catch (error) {
-    logger.warn("Failed to extract action kind from datum:", error);
-    return "Unknown";
-  }
+  return actionKindFromCosponsored(cosponsored);
 };
 
 /**
- * Extract anchor from parsed datum
+ * Extract anchor from a parsed datum.
+ *
+ * Returns `null` for `After`-state datums and for any failure. Callers that
+ * previously saw `{ url: "", hash: "" }` could not distinguish "decode
+ * failed" from "datum carries an intentionally-empty anchor" — and Bug 2
+ * exploited exactly that ambiguity. With `null` the caller must make an
+ * explicit policy choice.
  */
-const extractAnchorFromDatum = (
+export const extractAnchorFromDatum = (
   datumPlutusData: Core.PlutusData,
-): { url: string; hash: string } => {
-  try {
-    const parsedDatum = parse(CosponsorTypes.CosponsorDatum, datumPlutusData);
+): { url: string; hash: string } | null => {
+  const parsedDatum = parseCosponsorDatumData(
+    datumPlutusData,
+    "extractAnchorFromDatum",
+  );
+  if (parsedDatum === null || parsedDatum === "After") return null;
 
-    if (!parsedDatum || typeof parsedDatum !== "object") {
-      return { url: "", hash: "" };
-    }
+  const cosponsored = cosponsoredFromParsed(parsedDatum);
+  if (!cosponsored) return null;
 
-    if (
-      "Before" in parsedDatum &&
-      parsedDatum.Before &&
-      "cosponsored" in parsedDatum.Before
-    ) {
-      const anchor = parsedDatum.Before.cosponsored.anchor;
-      return {
-        url: anchor?.url || "",
-        hash: anchor?.hash || "",
-      };
-    }
+  return anchorFromCosponsored(cosponsored);
+};
 
-    return { url: "", hash: "" };
-  } catch (error) {
-    logger.warn("Failed to extract anchor from datum:", error);
-    return { url: "", hash: "" };
+/**
+ * Convert a schema-side parsed `GovernanceActionId` (the form returned by
+ * `parse(CosponsorTypes.CosponsorDatum, …)`) into the typed
+ * `IGovernanceActionId` accepted by the manual builders. The schema uses
+ * `{ transaction, proposalProcedure }` (matching the on-chain record); the
+ * typed shape uses `{ txHash, index }`.
+ */
+const ancestorFromSchema = (
+  schemaAncestor:
+    | { transaction: string; proposalProcedure: bigint }
+    | undefined
+    | null,
+): IGovernanceActionId | null => {
+  if (!schemaAncestor) return null;
+  return {
+    txHash: schemaAncestor.transaction,
+    index: Number(schemaAncestor.proposalProcedure),
+  };
+};
+
+/**
+ * Convert a parsed schema-side Credential shape (`{ VerificationKeyCredential: [hash] }`
+ * / `{ ScriptCredential: [hash] }`) into the typed `TCredential`
+ * (`{ vkey }` / `{ script }`) accepted by the manual builders.
+ */
+const credentialFromSchema = (cred: unknown): TCredential | null => {
+  if (!cred || typeof cred !== "object") return null;
+  if (
+    "VerificationKeyCredential" in cred &&
+    Array.isArray(
+      (cred as { VerificationKeyCredential: unknown[] })
+        .VerificationKeyCredential,
+    )
+  ) {
+    const arr = (cred as { VerificationKeyCredential: unknown[] })
+      .VerificationKeyCredential;
+    if (typeof arr[0] === "string") return { vkey: arr[0] };
   }
+  if (
+    "ScriptCredential" in cred &&
+    Array.isArray((cred as { ScriptCredential: unknown[] }).ScriptCredential)
+  ) {
+    const arr = (cred as { ScriptCredential: unknown[] }).ScriptCredential;
+    if (typeof arr[0] === "string") return { script: arr[0] };
+  }
+  return null;
+};
+
+/**
+ * Walk a `Pairs<Credential, Int>` PlutusMap (the wire shape of
+ * TreasuryWithdrawal.beneficiaries / ConstitutionalCommittee.addedMembers)
+ * back into the typed `Map<TCredential, bigint>` accepted by the manual
+ * builders. The schema marks these fields as `TPlutusData` passthrough so
+ * the parsed value is the raw `PlutusData` — we walk the map ourselves.
+ *
+ * Returns null when any entry's credential can't be decoded (caller treats
+ * that as "procedure can't be safely reconstructed").
+ */
+const credentialMapFromPlutusData = (
+  data: unknown,
+): Map<TCredential, bigint> | null => {
+  if (!data) {
+    logger.warn("credentialMapFromPlutusData: data is null/undefined");
+    return null;
+  }
+  // Duck-type via `asMap` (PlutusData uses `getKind()` not `kind()`, so don't
+  // try to gate on a method-name check — just call asMap inside try/catch).
+  // Object.keys on a real PlutusData returns [] because its fields are
+  // private, so length-of-keys is also not a useful signal.
+  const pd = data as Core.PlutusData;
+  if (typeof pd.asMap !== "function") {
+    logger.warn(
+      "credentialMapFromPlutusData: data lacks .asMap() — got",
+      typeof data,
+      "constructor",
+      (data as { constructor?: { name?: string } }).constructor?.name,
+    );
+    return null;
+  }
+  let plutusMap: Core.PlutusMap;
+  try {
+    const maybeMap = pd.asMap();
+    if (!maybeMap) {
+      logger.warn(
+        "credentialMapFromPlutusData: pd.asMap() returned null/undefined — kind was",
+        pd.getKind?.(),
+      );
+      return null;
+    }
+    plutusMap = maybeMap;
+  } catch (error) {
+    logger.warn("credentialMapFromPlutusData: pd.asMap() threw", error);
+    return null;
+  }
+  const result = new Map<TCredential, bigint>();
+  const keys = plutusMap.getKeys();
+  for (let i = 0; i < keys.getLength(); i++) {
+    const keyData = keys.get(i);
+    const valueData = plutusMap.get(keyData);
+    if (!valueData) {
+      logger.warn(
+        `credentialMapFromPlutusData: map[${i}] value missing for key`,
+      );
+      return null;
+    }
+    // Parse the credential PlutusData back through the schema.
+    let credParsed: unknown;
+    try {
+      credParsed = parse(CosponsorTypes.Credential, keyData);
+    } catch (error) {
+      logger.warn(
+        `credentialMapFromPlutusData: map[${i}] credential parse threw`,
+        error,
+      );
+      return null;
+    }
+    const cred = credentialFromSchema(credParsed);
+    if (!cred) {
+      logger.warn(
+        `credentialMapFromPlutusData: map[${i}] credentialFromSchema returned null — parsed shape was`,
+        typeof credParsed === "object" && credParsed !== null
+          ? Object.keys(credParsed)
+          : credParsed,
+      );
+      return null;
+    }
+    let amount: bigint;
+    try {
+      amount = valueData.asInteger() ?? 0n;
+    } catch (error) {
+      logger.warn(
+        `credentialMapFromPlutusData: map[${i}] value.asInteger() threw`,
+        error,
+      );
+      return null;
+    }
+    result.set(cred, amount);
+  }
+  return result;
+};
+
+/**
+ * Convert the parsed-schema governance action (the value returned by
+ * `parse(CosponsorTypes.CosponsorDatum, …).Before.cosponsored.procedure.governanceAction`)
+ * into the typed `TGovernanceAction` accepted by `browserDeposit` /
+ * `buildGovernanceActionAsPlutusData`.
+ *
+ * Returns `null` when the action variant is structurally unrecognised or
+ * carries data we can't reconstruct losslessly. Caller treats that as
+ * "procedure can't be safely re-used" and falls back to building from
+ * card-level fields (which may itself fail loudly — preferable to silently
+ * producing a different procedure hash).
+ */
+const typedActionFromSchema = (
+  parsedAction: unknown,
+): TGovernanceAction | null => {
+  if (parsedAction === "NicePoll") {
+    return { kind: "NicePoll" };
+  }
+  if (!parsedAction || typeof parsedAction !== "object") return null;
+  const obj = parsedAction as Record<string, unknown>;
+
+  if ("ProtocolParameters" in obj) {
+    const inner = obj.ProtocolParameters as {
+      ancestor?: { transaction: string; proposalProcedure: bigint };
+    };
+    return {
+      kind: "ProtocolParameters",
+      ancestor: ancestorFromSchema(inner?.ancestor),
+    };
+  }
+  if ("HardFork" in obj) {
+    const inner = obj.HardFork as {
+      ancestor?: { transaction: string; proposalProcedure: bigint };
+      newVersion: { major: bigint; minor: bigint };
+    };
+    if (!inner?.newVersion) return null;
+    return {
+      kind: "HardFork",
+      ancestor: ancestorFromSchema(inner.ancestor),
+      version: {
+        major: Number(inner.newVersion.major),
+        minor: Number(inner.newVersion.minor),
+      },
+    };
+  }
+  if ("TreasuryWithdrawal" in obj) {
+    const inner = obj.TreasuryWithdrawal as {
+      beneficiaries: unknown;
+      guardrails?: string;
+    };
+    const beneficiaries = credentialMapFromPlutusData(inner?.beneficiaries);
+    if (!beneficiaries) return null;
+    return {
+      kind: "TreasuryWithdrawal",
+      beneficiaries,
+      guardRails: inner.guardrails,
+    };
+  }
+  if ("NoConfidence" in obj) {
+    const inner = obj.NoConfidence as {
+      ancestor?: { transaction: string; proposalProcedure: bigint };
+    };
+    return {
+      kind: "NoConfidence",
+      ancestor: ancestorFromSchema(inner?.ancestor),
+    };
+  }
+  if ("ConstitutionalCommittee" in obj) {
+    const inner = obj.ConstitutionalCommittee as {
+      ancestor?: { transaction: string; proposalProcedure: bigint };
+      evictedMembers: unknown[];
+      addedMembers: unknown;
+      quorum: { numerator: bigint; denominator: bigint };
+    };
+    const evicted: TCredential[] = [];
+    for (const e of inner.evictedMembers ?? []) {
+      const cred = credentialFromSchema(e);
+      if (!cred) return null;
+      evicted.push(cred);
+    }
+    const added = credentialMapFromPlutusData(inner.addedMembers);
+    if (!added) return null;
+    return {
+      kind: "ConstitutionalCommittee",
+      ancestor: ancestorFromSchema(inner.ancestor),
+      membersToRemove: evicted,
+      membersToAdd: added,
+      quorum: inner.quorum,
+    };
+  }
+  if ("NewConstitution" in obj) {
+    const inner = obj.NewConstitution as {
+      ancestor?: { transaction: string; proposalProcedure: bigint };
+      constitution?: { guardRails?: string };
+    };
+    // The on-chain Constitution carries only `guardrails: Option<ScriptHash>`
+    // (no document anchor). Round-trip it so the rebuild matches byte-for-byte
+    // — see `buildNewConstitutionAsPlutusData`. (audit H2)
+    return {
+      kind: "NewConstitution",
+      ancestor: ancestorFromSchema(inner.ancestor),
+      guardrails: inner.constitution?.guardRails,
+    };
+  }
+  return null;
+};
+
+/**
+ * Reconstruct the full typed `ICosponsoredProposal` from a script UTxO's
+ * datum so callers (UI's "Sponsor again from Your Pledges" flow) can re-mint
+ * the SAME gADA token instead of building a different procedure from
+ * card-level fields. Returns `null` for `After`-state UTxOs, decode
+ * failures, and variants whose action data can't be losslessly converted.
+ *
+ * Verified by re-hashing: we re-build the procedure PlutusData via the
+ * manual builder and check the hash matches the original on-chain
+ * `proposalHash`. If they diverge (lossy conversion) we return `null`
+ * rather than hand back a procedure that would mint a different token.
+ */
+export const extractCosponsoredProposalFromDatum = (
+  datumPlutusData: Core.PlutusData,
+  expectedProposalHash: string,
+): ICosponsoredProposal | null => {
+  const parsedDatum = parseCosponsorDatumData(
+    datumPlutusData,
+    `extractCosponsoredProposalFromDatum (hash ${expectedProposalHash.slice(0, 16)}…)`,
+  );
+  if (parsedDatum === null) return null;
+  if (parsedDatum === "After") {
+    logger.debug(
+      `extractCosponsoredProposalFromDatum: datum in After state for hash ` +
+        `${expectedProposalHash.slice(0, 16)}…`,
+    );
+    return null;
+  }
+  const cosponsored = cosponsoredFromParsed(parsedDatum);
+  if (!cosponsored) {
+    logger.warn(
+      `extractCosponsoredProposalFromDatum: unexpected datum shape for hash ` +
+        `${expectedProposalHash.slice(0, 16)}…`,
+      typeof parsedDatum === "object" && parsedDatum !== null
+        ? Object.keys(parsedDatum)
+        : typeof parsedDatum,
+    );
+    return null;
+  }
+  return cosponsoredProposalFromCosponsored(cosponsored, expectedProposalHash);
+};
+
+/**
+ * Core of {@link extractCosponsoredProposalFromDatum}, operating on an
+ * already-parsed `Before.cosponsored` payload so scan loops that parsed the
+ * datum once can skip the redundant re-parse.
+ */
+const cosponsoredProposalFromCosponsored = (
+  cosponsored: TParsedCosponsored,
+  expectedProposalHash: string,
+): ICosponsoredProposal | null => {
+  const procedure = cosponsored.procedure;
+  if (!procedure || !cosponsored.anchor) {
+    logger.warn(
+      `extractCosponsoredProposalFromDatum: missing procedure or anchor for hash ` +
+        `${expectedProposalHash.slice(0, 16)}…`,
+      { hasProcedure: !!procedure, hasAnchor: !!cosponsored.anchor },
+    );
+    return null;
+  }
+
+  const action = typedActionFromSchema(procedure.governanceAction);
+  if (!action) {
+    const variant =
+      typeof procedure.governanceAction === "string"
+        ? procedure.governanceAction
+        : procedure.governanceAction
+          ? Object.keys(procedure.governanceAction as object)[0]
+          : "<missing>";
+    logger.warn(
+      `extractCosponsoredProposalFromDatum: typed-action conversion failed for ` +
+        `variant "${variant}" (hash ${expectedProposalHash.slice(0, 16)}…)`,
+    );
+    return null;
+  }
+
+  const candidate: ICosponsoredProposal = {
+    deposit: procedure.deposit,
+    anchor: { url: cosponsored.anchor.url, hash: cosponsored.anchor.hash },
+    action,
+  };
+
+  // Verify round-trip: rebuild the procedure via the manual builder (the
+  // same path `browserDeposit` will take when minting the next pledge) and
+  // confirm its hash matches the on-chain asset name. Mismatch means our
+  // typed-action conversion dropped data — refuse the reuse rather than
+  // hand back a procedure that would mint a different gADA token.
+  try {
+    const cosponsorHash = BROWSER_CONFIG.scripts.cosponsor.hash;
+    const reHash = computeProposalAssetName(candidate, cosponsorHash);
+    if (reHash !== expectedProposalHash) {
+      logger.warn(
+        `extractCosponsoredProposalFromDatum: manual-builder hash ` +
+          `(${reHash.slice(0, 16)}…) does not match on-chain proposalHash ` +
+          `(${expectedProposalHash.slice(0, 16)}…) — refusing reuse`,
+      );
+      return null;
+    }
+  } catch (error) {
+    logger.warn(
+      "extractCosponsoredProposalFromDatum: round-trip hash check threw",
+      error,
+    );
+    return null;
+  }
+
+  return candidate;
 };
 
 export interface IUserGadaBalance {
@@ -533,12 +565,44 @@ export interface IScriptUtxo {
   lockedAmount: bigint;
   /** The raw UTxO for transaction building */
   utxo: Core.TransactionUnspentOutput;
-  /** Parsed governance action kind from the datum */
+  /**
+   * Parsed governance action kind from the datum. Empty string when the
+   * datum could not be decoded — check `decodingFailed` to disambiguate.
+   */
   actionKind: string;
-  /** Parsed anchor from the datum */
+  /**
+   * Parsed anchor from the datum. `{ url: "", hash: "" }` when the datum
+   * could not be decoded — check `decodingFailed` to disambiguate.
+   */
   anchor: { url: string; hash: string };
-  /** Computed blake2b-256 hash of ProposalProcedure - matches gADA token asset name */
+  /**
+   * blake2b-256 hash of `CosponsoredProposalProcedure` — matches the gADA
+   * token asset name. Empty string when the datum could not be decoded or
+   * the UTxO is in `After` state. Check `decodingFailed` to tell the two
+   * apart.
+   */
   proposalHash: string;
+  /**
+   * `true` when the datum was present but could not be parsed (schema
+   * regression, malformed bytes, etc.). Callers should treat this UTxO's
+   * anchor / actionKind / proposalHash as opaque rather than using them
+   * to label a user-facing proposal. See AUDIT.md Bug 2 for context.
+   */
+  decodingFailed: boolean;
+  /**
+   * `true` when the UTxO has no inline datum at all (legitimate edge case
+   * for `After`-state script UTxOs or non-standard UTxOs sent here).
+   */
+  hasDatum: boolean;
+  /**
+   * Full typed `ICosponsoredProposal` recovered from the datum, suitable
+   * for re-use with `browserDeposit` to mint into the SAME gADA token.
+   * `null` for `After`-state UTxOs, decode failures, or variants whose
+   * action data can't be losslessly converted to the typed shape (the
+   * round-trip hash check refuses to return a procedure that would mint
+   * a different token).
+   */
+  cosponsoredProposal: ICosponsoredProposal | null;
 }
 
 export interface IWithdrawalPlan {
@@ -568,12 +632,9 @@ export const fetchWithdrawalPlan = async (
   const gAdaPolicyId = BROWSER_CONFIG.scripts.cosponsor.hash;
 
   // Calculate the cosponsor script address from the script hash
-  const cosponsorScriptAddress = Core.addressFromCredential(
+  const cosponsorScriptAddress = getCosponsorScriptAddress(
     blaze.provider.network,
-    Core.Credential.fromCore({
-      hash: Core.Hash28ByteBase16(gAdaPolicyId),
-      type: Core.CredentialType.ScriptHash,
-    }),
+    gAdaPolicyId,
   );
 
   // Step 1: Get all gADA tokens from user's wallet
@@ -629,61 +690,93 @@ export const fetchWithdrawalPlan = async (
   const stats = pendingUtxoTracker.getStats();
   if (stats.spentCount > 0 || stats.pendingCount > 0) {
     logger.debug(
-      `🔄 Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`,
+      `Applying UTxO tracking: ${stats.spentCount} spent, ${stats.pendingCount} pending`,
     );
     rawScriptUtxos = pendingUtxoTracker.applyToUtxoList(rawScriptUtxos);
   }
 
   const scriptUtxos: IScriptUtxo[] = rawScriptUtxos.map(
     (utxo: Core.TransactionUnspentOutput) => {
-      // Parse datum to get action kind, anchor, and proposal hash
-      let actionKind = "Unknown";
-      let anchor = { url: "", hash: "" };
-      let proposalHash = "";
+      const output = utxo.output();
+      const datum = output.datum();
+      const txId = utxo.input().transactionId().slice(0, 8);
 
-      try {
-        const output = utxo.output();
-        const datum = output.datum();
-
-        if (datum) {
-          // Get the inline datum (PlutusData). Cast bridges the slightly
-          // divergent Datum types between @blaze-cardano/core and
-          // @cardano-sdk/core that surface through transitive imports.
-          const inlineDatum = (datum.asInlineData?.() ??
-            datum) as unknown as Core.PlutusData;
-
-          // Use the typed parsing functions that use the same serialize logic as minting
-          actionKind = extractActionKindFromDatum(inlineDatum);
-          anchor = extractAnchorFromDatum(inlineDatum);
-          proposalHash = computeProposalHashFromDatum(inlineDatum);
-
-          const txId = utxo.input().transactionId().slice(0, 8);
-          if (proposalHash) {
-            logger.debug(
-              `🔍 UTxO ${txId}...: ✓ actionKind=${actionKind}, hash=${proposalHash.slice(0, 16)}...`,
-            );
-          } else {
-            logger.debug(
-              `🔍 UTxO ${txId}...: ✗ No hash (actionKind=${actionKind})`,
-            );
-          }
-        } else {
-          logger.debug(
-            `🔍 UTxO ${utxo.input().transactionId().slice(0, 8)}...: ✗ No datum`,
-          );
-        }
-      } catch (error) {
-        logger.warn("Failed to parse UTxO datum:", error);
+      if (!datum) {
+        logger.debug(`UTxO ${txId}...: no datum`);
+        return {
+          txHash: utxo.input().transactionId(),
+          outputIndex: Number(utxo.input().index()),
+          lockedAmount: utxo.output().amount().coin(),
+          utxo,
+          actionKind: "",
+          anchor: { url: "", hash: "" },
+          proposalHash: "",
+          decodingFailed: false,
+          hasDatum: false,
+          cosponsoredProposal: null,
+        };
       }
+
+      // Standardised inline-datum extraction (audit H3). Returns null when the
+      // datum is present but not inline (e.g. hash-only). Pre-H3 this coerced
+      // the raw datum object into PlutusData and let the extractors fail their
+      // way to the same "decode failed" outcome — now it's explicit.
+      const inlineDatum = extractInlineDatum(datum);
+
+      // Parse the datum ONCE and feed the parsed payload to every extractor.
+      // The pre-refactor code re-parsed the same CBOR up to 4× per UTxO
+      // (hash, kind, anchor, typed-procedure recovery).
+      const parsedDatum = inlineDatum
+        ? parseCosponsorDatumData(inlineDatum, `UTxO ${txId} datum`)
+        : null;
+      const cosponsored =
+        parsedDatum !== null && parsedDatum !== "After"
+          ? cosponsoredFromParsed(parsedDatum)
+          : null;
+
+      const proposalHash = cosponsored
+        ? proposalHashFromCosponsored(cosponsored)
+        : null;
+      const actionKind = cosponsored
+        ? actionKindFromCosponsored(cosponsored)
+        : null;
+      const anchor = cosponsored ? anchorFromCosponsored(cosponsored) : null;
+
+      // `null` from any extractor means either "After-state datum" or
+      // "decode threw". The latter is the dangerous case — Bug 2 lived
+      // here, with empty strings masquerading as real data. Treat any
+      // null as a decode failure for diagnostic purposes; callers can
+      // still see hasDatum=true so they know there *was* something.
+      const decodingFailed =
+        proposalHash === null || actionKind === null || anchor === null;
+
+      if (decodingFailed) {
+        logger.debug(`UTxO ${txId}...: ✗ datum decode failed`);
+      } else {
+        logger.debug(
+          `UTxO ${txId}...: ✓ actionKind=${actionKind}, hash=${proposalHash.slice(0, 16)}...`,
+        );
+      }
+
+      // Only attempt typed-procedure recovery when basic decoding succeeded;
+      // it does its own re-hash check internally and returns null on any
+      // lossy / mismatched conversion.
+      const cosponsoredProposal =
+        !decodingFailed && proposalHash && cosponsored
+          ? cosponsoredProposalFromCosponsored(cosponsored, proposalHash)
+          : null;
 
       return {
         txHash: utxo.input().transactionId(),
         outputIndex: Number(utxo.input().index()),
         lockedAmount: utxo.output().amount().coin(),
         utxo,
-        actionKind,
-        anchor,
-        proposalHash,
+        actionKind: actionKind ?? "",
+        anchor: anchor ?? { url: "", hash: "" },
+        proposalHash: proposalHash ?? "",
+        decodingFailed,
+        hasDatum: true,
+        cosponsoredProposal,
       };
     },
   );
@@ -739,16 +832,46 @@ export const selectUtxosForWithdrawal = (
 export interface IUserDeposit {
   tokenAssetName: string;
   tokenAmount: bigint;
+  /**
+   * Tx hash of the script UTxO this deposit was matched to. Empty string
+   * when no script UTxO could be matched — check `unmatched`.
+   */
   depositTxHash: string;
+  /** Output index of the matched script UTxO, or 0 when `unmatched`. */
   depositOutputIndex: number;
   depositAmount: bigint;
-  cosponsoredProposal: {
-    deposit: bigint | string;
+  /**
+   * Cosponsored proposal data recovered from the matched script UTxO's
+   * datum.
+   *
+   * - `cosponsoredProposal` is the fully-typed `ICosponsoredProposal` ready
+   *   to feed directly to `browserDeposit` (and produce the SAME gADA token
+   *   asset name, so the new pledge aggregates into the existing position).
+   *   `null` when `unmatched` is true, when the datum failed to decode, or
+   *   when the variant's action data can't be losslessly converted (the
+   *   builder's round-trip hash check refuses to return a procedure that
+   *   would mint a different token).
+   * - The narrow `actionSummary` view is preserved for callers that just
+   *   want the action kind / anchor without dealing with full typed shape.
+   *   Always populated; `action.kind` is `"Unknown"` for unmatched
+   *   deposits.
+   */
+  cosponsoredProposal: ICosponsoredProposal | null;
+  actionSummary: {
+    deposit: bigint;
     anchor: { url: string; hash: string };
     action: { kind: string };
   };
   proposalUrl: string;
   proposalHash: string;
+  /**
+   * `true` when no script UTxO matched this token's asset name. Pre-audit
+   * code silently stamped the user's deposit with an unrelated UTxO's
+   * anchor in this case (Bug 2) — now the deposit is surfaced with empty
+   * fields so the UI can render an "unknown proposal" state rather than a
+   * misleading label.
+   */
+  unmatched: boolean;
 }
 
 /**
@@ -807,7 +930,8 @@ export const fetchUserDeposits = async (
         depositTxHash: matchedUtxo.txHash,
         depositOutputIndex: matchedUtxo.outputIndex,
         depositAmount: token.tokenAmount,
-        cosponsoredProposal: {
+        cosponsoredProposal: matchedUtxo.cosponsoredProposal,
+        actionSummary: {
           deposit: token.tokenAmount,
           anchor: matchedUtxo.anchor,
           action: { kind: matchedUtxo.actionKind },
@@ -816,37 +940,37 @@ export const fetchUserDeposits = async (
           ? Buffer.from(matchedUtxo.anchor.url, "hex").toString()
           : "On-chain proposal",
         proposalHash: token.tokenAssetName,
+        unmatched: false,
       });
     } else {
-      // No match found - fall back to selecting UTxOs by amount
+      // No match found. Pre-audit code fell back to amount-based UTxO
+      // selection and stamped that UTxO's anchor onto the user's deposit
+      // — which is Bug 2: distinct deposits ended up labeled as the same
+      // proposal whenever any script UTxO's datum failed to decode (e.g.,
+      // before the schema fixes, every NewConstitution deposit triggered
+      // this). The fallback is removed. The deposit is surfaced with
+      // empty proposal data and `unmatched: true`; the UI is expected to
+      // render this as "unknown proposal" rather than guessing.
       logger.debug(
-        `  ✗ Token ${token.tokenAssetName.slice(0, 16)}... no hash match, using fallback`,
+        `  ✗ Token ${token.tokenAssetName.slice(0, 16)}... no hash match — surfacing as unmatched`,
       );
 
-      const { selected } = selectUtxosForWithdrawal(
-        plan.scriptUtxos,
-        token.tokenAmount,
-      );
-
-      if (selected.length > 0) {
-        const firstUtxo = selected[0];
-        deposits.push({
-          tokenAssetName: token.tokenAssetName,
-          tokenAmount: token.tokenAmount,
-          depositTxHash: firstUtxo.txHash,
-          depositOutputIndex: firstUtxo.outputIndex,
-          depositAmount: token.tokenAmount,
-          cosponsoredProposal: {
-            deposit: token.tokenAmount,
-            anchor: firstUtxo.anchor,
-            action: { kind: firstUtxo.actionKind },
-          },
-          proposalUrl: firstUtxo.anchor.url
-            ? Buffer.from(firstUtxo.anchor.url, "hex").toString()
-            : "On-chain proposal",
-          proposalHash: token.tokenAssetName,
-        });
-      }
+      deposits.push({
+        tokenAssetName: token.tokenAssetName,
+        tokenAmount: token.tokenAmount,
+        depositTxHash: "",
+        depositOutputIndex: 0,
+        depositAmount: token.tokenAmount,
+        cosponsoredProposal: null,
+        actionSummary: {
+          deposit: token.tokenAmount,
+          anchor: { url: "", hash: "" },
+          action: { kind: "Unknown" },
+        },
+        proposalUrl: "On-chain proposal",
+        proposalHash: token.tokenAssetName,
+        unmatched: true,
+      });
     }
   }
 

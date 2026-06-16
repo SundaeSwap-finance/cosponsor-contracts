@@ -11,7 +11,12 @@ This directory contains the main operational scripts for the cosponsor protocol.
 
 ### Operational Scripts (Regular Use)
 - **`deposit.ts`** - Submit deposit transactions to cosponsor proposals
-- **`withdrawal.ts`** - Withdraw deposited ADA by burning gAda tokens
+
+> Withdrawals are not a standalone script. Use the SDK's exported
+> `withdraw({ blaze, deposits })` (from `@sundaeswap/cosponsor-sdk`), which
+> handles single, same-proposal bulk, and multi-proposal bulk withdrawals in
+> one call. (The old `withdrawal.ts` scaffolding referenced builders that no
+> longer exist and was removed — see audit C2.)
 
 ## Usage
 
@@ -25,7 +30,7 @@ This directory contains the main operational scripts for the cosponsor protocol.
 2. **Regular Operations:**
    ```bash
    bun run deposit <amount>     # Deposit ADA to a proposal
-   bun run withdrawal <tx_hash> # Withdraw deposited ADA
+   # Withdraw: call the SDK's withdraw({ blaze, deposits }) from your own code
    ```
 
 ## Helper Scripts

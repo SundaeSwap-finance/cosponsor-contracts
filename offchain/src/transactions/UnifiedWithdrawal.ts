@@ -56,7 +56,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     throw new Error("No deposits provided for withdrawal");
   }
 
-  log(`🔄 Starting withdrawal for ${deposits.length} deposits`);
+  log(`Starting withdrawal for ${deposits.length} deposits`);
 
   const tx = blaze.newTransaction();
 
@@ -96,7 +96,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     group.totalAmount += deposit.depositAmount;
   }
 
-  log(`📊 Withdrawing from ${proposalGroups.size} different proposal(s)`);
+  log(`Withdrawing from ${proposalGroups.size} different proposal(s)`);
 
   // Find and validate all deposit UTxOs
   const depositUtxos: Array<{
@@ -109,7 +109,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
 
   for (const deposit of deposits) {
     log(
-      `🔍 Looking for deposit ${deposit.depositTxHash.slice(0, 16)}:${deposit.depositOutputIndex}`,
+      `Looking for deposit ${deposit.depositTxHash.slice(0, 16)}:${deposit.depositOutputIndex}`,
     );
 
     try {
@@ -127,14 +127,14 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
         if (amount !== deposit.depositAmount) {
           if (debugMode) {
             logger.warn(
-              `⚠️ Amount mismatch for ${deposit.depositTxHash}:${deposit.depositOutputIndex}: expected ${deposit.depositAmount}, found ${amount}`,
+              `Amount mismatch for ${deposit.depositTxHash}:${deposit.depositOutputIndex}: expected ${deposit.depositAmount}, found ${amount}`,
             );
           }
         }
 
         depositUtxos.push({ utxo, amount, deposit });
         totalWithdrawalAmount += amount;
-        log(`  ✅ Found UTxO: ${amount / 1_000_000n} ADA`);
+        log(`  Found UTxO: ${amount / 1_000_000n} ADA`);
       } else {
         throw new Error(
           `UTxO ${deposit.depositTxHash}:${deposit.depositOutputIndex} not found or already spent`,
@@ -147,7 +147,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     }
   }
 
-  log(`💰 Total withdrawal amount: ${totalWithdrawalAmount / 1_000_000n} ADA`);
+  log(`Total withdrawal amount: ${totalWithdrawalAmount / 1_000_000n} ADA`);
 
   // Add script references for first proposal (they should all use same cosponsor script)
   const firstProposalGroup = proposalGroups.values().next().value;
@@ -205,7 +205,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log(`⚠️ Could not find state UTxO: ${errorMessage}`);
+    log(`Could not find state UTxO: ${errorMessage}`);
   }
 
   // Create withdraw redeemer
@@ -217,7 +217,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
   // Add all deposit UTxOs as inputs
   for (const { utxo, deposit } of depositUtxos) {
     log(
-      `📥 Adding deposit UTxO ${deposit.depositTxHash.slice(0, 16)}:${deposit.depositOutputIndex}`,
+      `Adding deposit UTxO ${deposit.depositTxHash.slice(0, 16)}:${deposit.depositOutputIndex}`,
     );
     tx.addInput(utxo, withdrawRedeemer);
   }
@@ -226,7 +226,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
   const requiredTokens = new Map<string, bigint>();
   const gAdaPolicyId = firstCosponsor.script().hash();
 
-  for (const [proposalKey, group] of proposalGroups) {
+  for (const group of proposalGroups.values()) {
     const cosponsor = Cosponsor.new({
       statePolicyId: cosponsorState.script().hash(),
       cosponsoredProposal: group.proposal,
@@ -237,7 +237,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     requiredTokens.set(assetId, group.totalAmount);
 
     log(
-      `🎯 Need ${group.totalAmount / 1_000_000n} gAda of token ${tokenAssetName.slice(0, 20)}... for ${group.deposits.length} deposits`,
+      `Need ${group.totalAmount / 1_000_000n} gAda of token ${tokenAssetName.slice(0, 20)}... for ${group.deposits.length} deposits`,
     );
   }
 
@@ -252,7 +252,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
   }
 
   log(
-    `🔍 Scanning ${walletUtxos.length} wallet UTxOs for required gAda tokens...`,
+    `Scanning ${walletUtxos.length} wallet UTxOs for required gAda tokens...`,
   );
 
   for (let i = 0; i < walletUtxos.length; i++) {
@@ -274,7 +274,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
           collectedTokens.set(assetId, currentCollected + tokenAmount);
           utxoIsUseful = true;
           log(
-            `  📦 UTxO ${i} has ${tokenAmount / 1_000_000n} gAda tokens we need`,
+            `  UTxO ${i} has ${tokenAmount / 1_000_000n} gAda tokens we need`,
           );
         }
       }
@@ -294,7 +294,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     }
 
     if (allSatisfied) {
-      log(`✅ Found sufficient tokens after checking ${i + 1} UTxOs`);
+      log(`Found sufficient tokens after checking ${i + 1} UTxOs`);
       break;
     }
   }
@@ -311,7 +311,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
   }
 
   // Add selected UTxOs as inputs
-  log(`📥 Adding ${selectedUtxos.length} wallet UTxOs containing gAda tokens`);
+  log(`Adding ${selectedUtxos.length} wallet UTxOs containing gAda tokens`);
   for (const utxo of selectedUtxos) {
     tx.addInput(utxo);
   }
@@ -330,7 +330,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
     const assetName = assetId.substring(56); // Remove policy ID prefix
     burnAmounts.set(Core.AssetName(assetName), -amount); // Negative for burning
     log(
-      `🔥 Burning ${amount / 1_000_000n} gAda of token ${assetName.slice(0, 20)}...`,
+      `Burning ${amount / 1_000_000n} gAda of token ${assetName.slice(0, 20)}...`,
     );
   }
 
@@ -341,7 +341,7 @@ export const withdraw = async <P extends Provider, W extends Wallet>({
   tx.payAssets(changeAddress, makeValue(totalWithdrawalAmount));
   tx.setChangeAddress(changeAddress);
 
-  log(`💰 Recovering ${totalWithdrawalAmount / 1_000_000n} ADA to wallet`);
+  log(`Recovering ${totalWithdrawalAmount / 1_000_000n} ADA to wallet`);
 
   return tx;
 };

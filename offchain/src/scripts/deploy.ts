@@ -172,7 +172,7 @@ export const deployContracts = async (
     count++;
   }
 
-  console.log("\n" + "=".repeat(70));
+  console.log(`\n${"=".repeat(70)}`);
   console.log("DEPLOYMENT COMPLETE");
   console.log("=".repeat(70));
   console.log(

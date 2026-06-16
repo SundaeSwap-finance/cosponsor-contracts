@@ -1,15 +1,27 @@
 /**
- * Browser-compatible configuration for CoSponsor contracts
- * Uses pre-deployed script hashes to avoid runtime parameter application
+ * Browser-compatible configuration for CoSponsor contracts.
+ * Uses pre-deployed script hashes to avoid runtime parameter application.
+ *
+ * The env-driven protocol constants (`scriptReferenceAddress` and everything
+ * under `protocol`) are imported from `Config.ts` rather than re-hardcoded, so
+ * there's a single source of truth — a redeploy that updates Config's defaults
+ * (or a consumer's env) can't leave the browser config silently stale. (audit H8)
  */
+
+import { Core } from "@blaze-cardano/sdk";
+import {
+  PROTOCOL_BOOT_TRANSACTION_ID,
+  PROTOCOL_BOOT_TRANSACTION_INDEX,
+  PROPOSAL_LIFETIME,
+  SCRIPT_REFERENCE_ADDRESS,
+} from "../Config.js";
 
 export const BROWSER_CONFIG = {
   // Network
   network: "cardano-preview" as const,
 
-  // Script reference deployment address (where all scripts are stored as reference scripts)
-  scriptReferenceAddress:
-    "addr_test1qp69u6ka06zrxm0akqsfku6w862klmxx5gv8s2n5sv75nfxenku8xvgssv0852hyj36cpkzfs5p0pqpspt6qapm2rapqkayyvf",
+  // Script reference deployment address — single-sourced from Config.ts (H8).
+  scriptReferenceAddress: SCRIPT_REFERENCE_ADDRESS,
 
   // Specific UTxO references for script references (tx_hash#output_index)
   scriptReferenceUtxos: {
@@ -50,13 +62,34 @@ export const BROWSER_CONFIG = {
     },
   },
 
-  // Protocol constants (from Config.js)
+  // Protocol constants — single-sourced from Config.ts (H8).
   protocol: {
-    bootTransactionId:
-      "98e0aa234d0803e83cf9c402795389cb17300715806e3281564ca7e2bc2a6987",
-    bootTransactionIndex: 0n,
-    proposalLifetime: 1000n * 60n * 60n * 24n * 5n, // 5 days in milliseconds
+    bootTransactionId: PROTOCOL_BOOT_TRANSACTION_ID,
+    bootTransactionIndex: PROTOCOL_BOOT_TRANSACTION_INDEX,
+    proposalLifetime: PROPOSAL_LIFETIME,
   },
 } as const;
 
 export type BrowserConfig = typeof BROWSER_CONFIG;
+
+/**
+ * Recompute the cosponsor script hash from its pre-computed CBOR and throw if it
+ * doesn't match the recorded hash — i.e. the blob is stale or was edited without
+ * regenerating. Called once at browser-entry load so a mismatch fails fast with
+ * a clear message instead of an opaque on-chain rejection later. (audit H9)
+ */
+export const verifyCosponsorScriptCbor = (
+  cbor: string = BROWSER_CONFIG.scripts.cosponsor.cbor,
+  expectedHash: string = BROWSER_CONFIG.scripts.cosponsor.hash,
+): void => {
+  const computed = Core.Script.newPlutusV3Script(
+    Core.PlutusV3Script.fromCbor(Core.HexBlob(cbor)),
+  ).hash();
+  if (computed !== expectedHash) {
+    throw new Error(
+      `[cosponsor-sdk] Cosponsor script CBOR/hash mismatch — the pre-computed ` +
+        `CBOR in BrowserConfig is stale (computed ${computed}, expected ` +
+        `${expectedHash}). Regenerate via \`bun run generate-script-cbor\`.`,
+    );
+  }
+};

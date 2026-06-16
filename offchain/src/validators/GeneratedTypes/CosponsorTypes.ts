@@ -47,11 +47,19 @@ const Contracts = Type.Module({
       ProtocolParameters: Type.Object(
         {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
-          newParameters: Type.Object({
-            ProtocolParametersUpdate: Type.Object({
-              inner: Type.Array(Type.Tuple([Type.BigInt(), TPlutusData])),
-            }),
-          }),
+          // Aiken `pub opaque type ProtocolParametersUpdate { inner: Pairs<Int, Data> }`.
+          // Opaque types in Aiken erase the Constr wrapper, so on-chain
+          // this is a bare CBOR Map (Pairs<Int, Data>). `Type.Record(K, V)`
+          // tells @blaze-cardano/data to emit a PlutusMap rather than a
+          // Constr-wrapped object (see the `patternProperties` branch in
+          // `data/dist/index.mjs`). Note: must be `Type.Integer()` not
+          // `Type.BigInt()` — TypeBox's Record dispatch only recognises
+          // Integer/Number as numeric-keyed; BigInt falls through to
+          // Never. The Blaze serializer still produces a BigInt-keyed
+          // CBOR Map (it casts each JS key via `BigInt(key)`). Matches
+          // the manual builder `buildProtocolParametersAsPlutusData`
+          // which emits `PlutusData.newMap(new PlutusMap())`.
+          newParameters: Type.Record(Type.Integer(), TPlutusData),
           guardrails: Type.Optional(Type.String()),
         },
         { ctor: 0n },
@@ -61,13 +69,14 @@ const Contracts = Type.Module({
       HardFork: Type.Object(
         {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
+          // Aiken `ProtocolVersion { major: Int, minor: Int }` is a single
+          // ctor-0 record: `Constr(0, [major, minor])`. The previous shape
+          // wrapped it in `{ ProtocolVersion: Type.Object(...) }` which
+          // both lacked a ctor on the inner Object and added an extra
+          // Constr layer. Matches the manual builder
+          // `buildHardForkAsPlutusData`.
           newVersion: Type.Object(
-            {
-              ProtocolVersion: Type.Object({
-                major: Type.BigInt(),
-                minor: Type.BigInt(),
-              }),
-            },
+            { major: Type.BigInt(), minor: Type.BigInt() },
             { ctor: 0n },
           ),
         },
@@ -77,9 +86,17 @@ const Contracts = Type.Module({
     Type.Object({
       TreasuryWithdrawal: Type.Object(
         {
-          beneficiaries: Type.Array(
-            Type.Tuple([Type.Ref("Credential"), Type.BigInt()]),
-          ),
+          // Aiken `beneficiaries: Pairs<Credential, Lovelace>` is a CBOR
+          // Map. @blaze-cardano/data's Type.Record only supports numeric or
+          // string keys via patternProperties — it can't represent a
+          // Constr-keyed Map natively. So this field is a TPlutusData
+          // passthrough: ToContractType builds the PlutusMap via
+          // `createBeneficiariesMap` and the serializer's
+          // `instanceof PlutusData` short-circuit forwards it unchanged.
+          // The previous `Type.Array(Type.Tuple(...))` shape produced a
+          // CBOR List of Constr-tuples on the wire if anyone passed plain
+          // JS data — incorrect bytes, masked at runtime by the workaround.
+          beneficiaries: TPlutusData,
           guardrails: Type.Optional(Type.String()),
         },
         { ctor: 2n },
@@ -98,9 +115,10 @@ const Contracts = Type.Module({
         {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
           evictedMembers: Type.Array(Type.Ref("Credential")),
-          addedMembers: Type.Array(
-            Type.Tuple([Type.Ref("Credential"), Type.BigInt()]),
-          ),
+          // Aiken `added_members: Pairs<Credential, Mandate>` — same CBOR
+          // Map / passthrough pattern as `TreasuryWithdrawal.beneficiaries`
+          // above.
+          addedMembers: TPlutusData,
           quorum: Type.Ref("Rational"),
         },
         { ctor: 4n },
@@ -110,11 +128,18 @@ const Contracts = Type.Module({
       NewConstitution: Type.Object(
         {
           ancestor: Type.Optional(Type.Ref("GovernanceActionId")),
-          constitution: Type.Object({
-            Constitution: Type.Object({
-              guardRails: Type.Optional(Type.String()),
-            }),
-          }),
+          // Aiken `Constitution { guardrails: Option<ScriptHash> }` is a
+          // single-ctor record: `Constr(0, [opt_guardrails])`. The previous
+          // shape wrapped it in `{ Constitution: Type.Object(...) }` which
+          // both (a) lacked a ctor on the inner Object and (b) added an
+          // extra Constr layer that doesn't exist on-chain. The current
+          // shape matches the manual builder in
+          // `validators/Types/GovernanceAction.ts:buildNewConstitutionAsPlutusData`
+          // and the Aiken type in `aiken-lang-stdlib/lib/cardano/governance.ak`.
+          constitution: Type.Object(
+            { guardRails: Type.Optional(Type.String()) },
+            { ctor: 0n },
+          ),
         },
         { ctor: 5n },
       ),

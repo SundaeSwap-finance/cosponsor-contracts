@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import { CosponsorState } from "@validators/CosponsorState.js";
 import { Cosponsor } from "@validators/Cosponsor.js";
 import {

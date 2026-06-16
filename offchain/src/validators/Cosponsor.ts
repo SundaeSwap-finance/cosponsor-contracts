@@ -2,10 +2,10 @@ import { CosponsorTypes } from "./GeneratedTypes/index.js";
 import { AlwaysTrue } from "./AlwaysTrue.js";
 import { PlutusV3Script } from "@blaze-cardano/core";
 import { TGovernanceAction, ToContractType } from "./Types/GovernanceAction.js";
-import { TCredential } from "./Types/Credential.js";
 import { serialize } from "@blaze-cardano/data";
 import { Core } from "@blaze-cardano/sdk";
 import { PlutusData } from "@blaze-cardano/core";
+import { scriptAddressFromHash } from "../utils/scriptAddress.js";
 
 // Convert the NFT name to hex for ByteArray type
 const default_state_nft_name = Buffer.from("cosponsor_state_nft").toString(
@@ -50,9 +50,6 @@ export class Cosponsor {
   }
 
   public static new(config: ICosponsorConfig): Cosponsor {
-    let cosponsoredProposal:
-      | CosponsorTypes.CosponsoredProposalProcedure
-      | undefined = undefined;
     const instance = new Cosponsor(
       config.statePolicyId,
       default_state_nft_name,
@@ -85,13 +82,7 @@ export class Cosponsor {
   }
 
   public address(network: Core.NetworkId): Core.Address {
-    return Core.addressFromCredential(
-      network,
-      Core.Credential.fromCore({
-        hash: this.script().hash(),
-        type: Core.CredentialType.ScriptHash,
-      }),
-    );
+    return scriptAddressFromHash(network, this.script().hash());
   }
 
   public datum(): PlutusData {

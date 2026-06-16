@@ -1,4 +1,3 @@
-import { Core } from "@blaze-cardano/sdk";
 import {
   PlutusData,
   PlutusMap,
@@ -77,8 +76,21 @@ export interface IConstitutionalCommittee extends IGovernanceAction {
 export interface INewConstitution extends IGovernanceAction {
   kind: "NewConstitution";
   ancestor: IGovernanceActionId | null;
-  constitutionHash: string;
-  constitutionUrl: string;
+  /**
+   * Optional guardrails script hash. Maps to the on-chain
+   * `Constitution { guardrails: Option<ScriptHash> }`. `undefined` = `None`,
+   * which encodes byte-identically to the pre-realign output — so existing
+   * NewConstitution proposals stay hash-stable. (audit H2)
+   */
+  guardrails?: string;
+  /**
+   * @deprecated The on-chain `Constitution` type carries no document anchor —
+   * only `guardrails`. This field has no on-chain slot, was silently ignored
+   * by the builder, and will be removed. Use {@link guardrails}. (audit H2)
+   */
+  constitutionHash?: string;
+  /** @deprecated No on-chain slot. See {@link constitutionHash}. (audit H2) */
+  constitutionUrl?: string;
 }
 
 // Constructor 6: Info Action (NicePoll)
@@ -190,16 +202,15 @@ export const ToContractType = (
   switch (ga.kind) {
     case "ProtocolParameters": {
       // Constructor 0: ParameterChange
+      // `newParameters` is the opaque `ProtocolParametersUpdate` which
+      // encodes as a bare CBOR Map (Pairs<Int, Data>). An empty object
+      // here means "no parameter changes" — matches the manual builder's
+      // empty `PlutusMap`.
       const pp = ga as IProtocolParameters;
       return {
         ProtocolParameters: {
           ancestor: ancestorToContract(pp.ancestor),
-          newParameters: {
-            ProtocolParametersUpdate: {
-              // Empty array = no parameter changes (valid for testing)
-              inner: [],
-            },
-          },
+          newParameters: {},
           guardrails: undefined, // No guardrails
         },
       };
@@ -207,15 +218,14 @@ export const ToContractType = (
 
     case "HardFork": {
       // Constructor 1: HardFork
+      // ProtocolVersion is a single ctor-0 record — no extra wrapper.
       const hf = ga as IHardFork;
       return {
         HardFork: {
           ancestor: ancestorToContract(hf.ancestor),
           newVersion: {
-            ProtocolVersion: {
-              major: BigInt(hf.version.major),
-              minor: BigInt(hf.version.minor),
-            },
+            major: BigInt(hf.version.major),
+            minor: BigInt(hf.version.minor),
           },
         },
       };
@@ -223,15 +233,15 @@ export const ToContractType = (
 
     case "TreasuryWithdrawal": {
       // Constructor 2: TreasuryWithdrawal
-      // CRITICAL: beneficiaries must be a CBOR Map (Pairs<Credential, Lovelace>),
-      // NOT an array of tuples. We pre-construct the PlutusMap and pass it through.
-      // The serialize() function passes PlutusData instances through directly.
+      // `beneficiaries` is `Pairs<Credential, Lovelace>` — a CBOR Map with
+      // Constr-typed keys. @blaze-cardano/data's schema language can't
+      // represent Constr-keyed Maps, so the schema types this field as
+      // `TPlutusData` and we hand it a pre-built PlutusMap. The serializer's
+      // `instanceof PlutusData` short-circuit forwards it unchanged.
       const tw = ga as ITreasuryWithdrawal;
-      const beneficiariesMap = createBeneficiariesMap(tw.beneficiaries);
       return {
         TreasuryWithdrawal: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          beneficiaries: beneficiariesMap as any, // PlutusData passed through serialize()
+          beneficiaries: createBeneficiariesMap(tw.beneficiaries),
           guardrails: tw.guardRails, // undefined for Option::None
         },
       };
@@ -249,15 +259,14 @@ export const ToContractType = (
 
     case "ConstitutionalCommittee": {
       // Constructor 4: ConstitutionalCommittee
-      // CRITICAL: addedMembers must be a CBOR Map (Pairs<Credential, Mandate>)
+      // `addedMembers` is `Pairs<Credential, Mandate>` — same CBOR-Map /
+      // TPlutusData passthrough pattern as TreasuryWithdrawal beneficiaries.
       const cc = ga as IConstitutionalCommittee;
-      const addedMembersMap = createBeneficiariesMap(cc.membersToAdd); // Same structure as beneficiaries
       return {
         ConstitutionalCommittee: {
           ancestor: ancestorToContract(cc.ancestor),
           evictedMembers: cc.membersToRemove.map(credentialToContract),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          addedMembers: addedMembersMap as any, // PlutusData passed through serialize()
+          addedMembers: createBeneficiariesMap(cc.membersToAdd),
           quorum: {
             numerator: cc.quorum.numerator,
             denominator: cc.quorum.denominator,
@@ -268,17 +277,17 @@ export const ToContractType = (
 
     case "NewConstitution": {
       // Constructor 5: NewConstitution
-      // Constitution is a record type (ctor 0) with single field guardrails: Option<ScriptHash>
-      // The generated types wrap it in { Constitution: {...} } but serialization needs it flat
+      // Aiken `Constitution { guardrails: Option<ScriptHash> }` is a single
+      // ctor-0 record. The schema now matches that exactly — no extra
+      // `{ Constitution: ... }` wrapper layer.
       const nc = ga as INewConstitution;
       return {
         NewConstitution: {
           ancestor: ancestorToContract(nc.ancestor),
-          // Try matching the exact generated type structure
           constitution: {
-            Constitution: {
-              guardRails: undefined, // Option::None for no guardrails script
-            },
+            // undefined → Option::None (byte-identical to the pre-realign
+            // output); a hex ScriptHash → Option::Some. (audit H2)
+            guardRails: nc.guardrails,
           },
         },
       };
@@ -295,6 +304,105 @@ export const ToContractType = (
       );
     }
   }
+};
+
+/**
+ * Inverse of `ToContractType` — convert a parsed CosponsorTypes.GovernanceAction
+ * back into the high-level UI `TGovernanceAction` shape with a discriminating
+ * `kind` field.
+ *
+ * Pre-audit code at `parseCosponsorDatum.ts:41-43` did this conversion via
+ * `proposal.procedure?.governanceAction || { kind: "Unknown" }` — but when
+ * the action was present, the parsed value was `{TreasuryWithdrawal: {...}}`
+ * or the literal string `"NicePoll"`, neither of which has a `.kind` field.
+ * Every downstream `.action.kind` read returned `undefined`, and
+ * `Cosponsor.new({...}).gAda()` threw `Unknown governance action kind: undefined`.
+ *
+ * **Caveats around `Pairs<Credential, V>` fields:** the schema's
+ * `beneficiaries` / `addedMembers` are now `TPlutusData` passthrough (see
+ * AUDIT.md F5/F6), so a parsed datum surfaces them as raw `PlutusData`
+ * instances. This helper returns `beneficiaries: []` / `membersToAdd: []`
+ * — placeholders. Callers that need the actual map contents should
+ * destructure them out of the raw datum themselves, or operate on the
+ * `rawCosponsoredProposal` field that `parseCosponsorDatum` preserves.
+ */
+export const fromContractType = (
+  parsed: CosponsorTypes.GovernanceAction,
+): TGovernanceAction => {
+  if (typeof parsed === "string") {
+    if (parsed === "NicePoll") {
+      return { kind: "NicePoll" };
+    }
+    throw new Error(`fromContractType: unexpected string variant "${parsed}"`);
+  }
+  if ("ProtocolParameters" in parsed) {
+    return {
+      kind: "ProtocolParameters",
+      ancestor: contractAncestorToUi(parsed.ProtocolParameters.ancestor),
+    };
+  }
+  if ("HardFork" in parsed) {
+    const v = parsed.HardFork.newVersion;
+    return {
+      kind: "HardFork",
+      ancestor: contractAncestorToUi(parsed.HardFork.ancestor),
+      version: { major: Number(v.major), minor: Number(v.minor) },
+    };
+  }
+  if ("TreasuryWithdrawal" in parsed) {
+    return {
+      kind: "TreasuryWithdrawal",
+      beneficiaries: [],
+      guardRails: parsed.TreasuryWithdrawal.guardrails,
+    };
+  }
+  if ("NoConfidence" in parsed) {
+    return {
+      kind: "NoConfidence",
+      ancestor: contractAncestorToUi(parsed.NoConfidence.ancestor),
+    };
+  }
+  if ("ConstitutionalCommittee" in parsed) {
+    const cc = parsed.ConstitutionalCommittee;
+    return {
+      kind: "ConstitutionalCommittee",
+      ancestor: contractAncestorToUi(cc.ancestor),
+      membersToRemove: cc.evictedMembers.map(contractCredentialToUi),
+      membersToAdd: [],
+      quorum: {
+        numerator: cc.quorum.numerator,
+        denominator: cc.quorum.denominator,
+      },
+    };
+  }
+  if ("NewConstitution" in parsed) {
+    return {
+      kind: "NewConstitution",
+      ancestor: contractAncestorToUi(parsed.NewConstitution.ancestor),
+      // The on-chain Constitution carries only `guardrails: Option<ScriptHash>`
+      // (no document anchor) — round-trip it so the rebuild is lossless. (H2)
+      guardrails: parsed.NewConstitution.constitution?.guardRails,
+    };
+  }
+  throw new Error(
+    `fromContractType: unhandled variant ${JSON.stringify(Object.keys(parsed))}`,
+  );
+};
+
+const contractAncestorToUi = (
+  a: { transaction: string; proposalProcedure: bigint } | undefined,
+): IGovernanceActionId | null => {
+  if (!a) return null;
+  return { txHash: a.transaction, index: Number(a.proposalProcedure) };
+};
+
+const contractCredentialToUi = (
+  c: { VerificationKeyCredential: [string] } | { ScriptCredential: [string] },
+): TCredential => {
+  if ("VerificationKeyCredential" in c) {
+    return { vkey: c.VerificationKeyCredential[0] };
+  }
+  return { script: c.ScriptCredential[0] };
 };
 
 /**
@@ -332,16 +440,31 @@ export const buildTreasuryWithdrawalAsPlutusData = (
 
   const beneficiariesData = PlutusData.newMap(plutusMap);
 
-  // Build guardrails as Option::None (Constructor 1, no fields)
-  // In Aiken, Option::None is ConstrPlutusData with alternative 1 and empty fields
-  const guardrailsNone = PlutusData.newConstrPlutusData(
-    new ConstrPlutusData(1n, new PlutusList()),
-  );
+  // Build guardrails as Option<ScriptHash>:
+  //   None       = Constructor 1, no fields  (byte-identical to the previous
+  //                hardcoded-None output, so existing tokens stay hash-stable)
+  //   Some(hash) = Constructor 0, [ByteArray(hash)]
+  // Mirrors buildNewConstitutionAsPlutusData (audit H2). Previously this was
+  // hardcoded to None while the parse path preserved guardrails — an
+  // asymmetric round-trip that made any TW datum with guardrails=Some fail
+  // the extractCosponsoredProposalFromDatum hash check.
+  let guardrailsData: PlutusData;
+  if (tw.guardRails) {
+    const someFields = new PlutusList();
+    someFields.add(PlutusData.newBytes(Buffer.from(tw.guardRails, "hex")));
+    guardrailsData = PlutusData.newConstrPlutusData(
+      new ConstrPlutusData(0n, someFields),
+    );
+  } else {
+    guardrailsData = PlutusData.newConstrPlutusData(
+      new ConstrPlutusData(1n, new PlutusList()),
+    );
+  }
 
   // Build TreasuryWithdrawal (Constructor 2)
   const fields = new PlutusList();
   fields.add(beneficiariesData);
-  fields.add(guardrailsNone);
+  fields.add(guardrailsData);
 
   const result = PlutusData.newConstrPlutusData(
     new ConstrPlutusData(2n, fields),
@@ -451,6 +574,36 @@ export const buildCosponsoredProposalProcedureAsPlutusData = (
 };
 
 /**
+ * Compute the gADA token asset name for a cosponsored proposal — the
+ * canonical proposal identity.
+ *
+ * Independent of any class instantiation; only requires the proposal and
+ * the cosponsor script hash. Pre-audit code forced consumers to build a
+ * `Cosponsor.new({...})` instance just to call `.gAda()` (which also
+ * required `statePolicyId`, irrelevant to the asset name). This helper
+ * avoids that and uses the manual `buildCosponsoredProposalProcedureAsPlutusData`
+ * path directly — which is byte-equivalent to the schema path (locked
+ * down by `gADA asset-name equivalence` tests).
+ */
+export const computeProposalAssetName = (
+  proposal: {
+    deposit: bigint;
+    anchor: { url: string; hash: string };
+    action: TGovernanceAction;
+  },
+  cosponsorScriptHash: string,
+): string => {
+  const governanceActionData = buildGovernanceActionAsPlutusData(
+    proposal.action,
+  );
+  return buildCosponsoredProposalProcedureAsPlutusData(governanceActionData, {
+    deposit: proposal.deposit,
+    returnAddress: { ScriptCredential: [cosponsorScriptHash] },
+    anchor: proposal.anchor,
+  }).hash();
+};
+
+/**
  * Build governance action PlutusData for any action type
  * Returns the raw PlutusData for the governance action
  */
@@ -530,7 +683,7 @@ const buildAncestorAsPlutusData = (
  * - Constructor 5 (NewConstitution)
  * - Field 0: ancestor (Option<GovernanceActionId>)
  * - Field 1: constitution (Constitution record - Constructor 0)
- *   - Field 0: guardrails (Option<ScriptHash>) - None for now
+ *   - Field 0: guardrails (Option<ScriptHash>) - None when nc.guardrails unset
  */
 export const buildNewConstitutionAsPlutusData = (
   nc: INewConstitution,
@@ -540,13 +693,23 @@ export const buildNewConstitutionAsPlutusData = (
 
   // Build Constitution (record type = Constructor 0)
   // Constitution { guardrails: Option<ScriptHash> }
-  // guardrails: None = Constructor 1, no fields
-  const guardrailsNone = PlutusData.newConstrPlutusData(
-    new ConstrPlutusData(1n, new PlutusList()),
-  );
+  //   None       = Constructor 1, no fields  (byte-identical to pre-realign)
+  //   Some(hash) = Constructor 0, [ByteArray(hash)]
+  let guardrailsData: PlutusData;
+  if (nc.guardrails) {
+    const someFields = new PlutusList();
+    someFields.add(PlutusData.newBytes(Buffer.from(nc.guardrails, "hex")));
+    guardrailsData = PlutusData.newConstrPlutusData(
+      new ConstrPlutusData(0n, someFields),
+    );
+  } else {
+    guardrailsData = PlutusData.newConstrPlutusData(
+      new ConstrPlutusData(1n, new PlutusList()),
+    );
+  }
 
   const constitutionFields = new PlutusList();
-  constitutionFields.add(guardrailsNone);
+  constitutionFields.add(guardrailsData);
   const constitutionData = PlutusData.newConstrPlutusData(
     new ConstrPlutusData(0n, constitutionFields),
   );

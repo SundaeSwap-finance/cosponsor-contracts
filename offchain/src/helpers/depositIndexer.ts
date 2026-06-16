@@ -1,7 +1,7 @@
-/* eslint-disable no-console */
 import { CardanoProvider } from "@utils/provider";
 import { Cosponsor, ICosponsoredProposal } from "@validators/index";
 import { CosponsorState } from "@validators/CosponsorState";
+import { CosponsorTypes } from "@validators/GeneratedTypes";
 import { serialize } from "@blaze-cardano/data";
 import {
   PROPOSAL_LIFETIME,
@@ -16,6 +16,7 @@ import {
 } from "../../types";
 import * as fs from "fs";
 import { parseCosponsorDatum } from "@helpers/parseCosponsorDatum";
+import { extractInlineDatum } from "@helpers/datumUtils";
 
 // Main indexer class
 export class DepositIndexer {
@@ -81,7 +82,7 @@ export class DepositIndexer {
       PROPOSAL_LIFETIME,
     );
 
-    const mockProposal = {
+    const mockProposal: ICosponsoredProposal = {
       deposit: 1_000_000n,
       anchor: {
         url: Buffer.from("test").toString("hex"),
@@ -118,42 +119,50 @@ export class DepositIndexer {
         `Processing deposit ${i + 1}/${scriptUtxos.length}: ${depositTxId.slice(0, 16)}... (${depositAmount / 1_000_000n} ADA)`,
       );
 
-      if (datum && datum.kind() === 1) {
-        const inlineDatum = datum.asInlineData();
-        if (inlineDatum) {
-          const parsedResult = parseCosponsorDatum(inlineDatum);
-          if (parsedResult) {
-            // Calculate expected token using raw datum proposal to avoid circular dependency
-            const expectedTokenAssetName = serialize(
-              CosponsorTypes.CosponsoredProposalProcedure,
-              parsedResult.rawCosponsoredProposal,
-            ).hash();
+      // Standardised inline-datum extraction (audit H3). Returns null for
+      // absent / hash-only datums, which we skip.
+      const inlineDatum = extractInlineDatum(datum);
+      if (inlineDatum) {
+        const parsedResult = parseCosponsorDatum(inlineDatum);
+        if (parsedResult.ok && parsedResult.value.datumType === "Before") {
+          // Calculate expected token using raw datum proposal to avoid circular dependency
+          const expectedTokenAssetName = serialize(
+            CosponsorTypes.CosponsoredProposalProcedure,
 
-            const proposalUrl = Buffer.from(
-              parsedResult.proposal.anchor.url,
-              "hex",
-            ).toString("utf-8");
+            parsedResult.value.rawCosponsoredProposal as any,
+          ).hash();
 
-            deposits.push({
-              tokenAssetName: expectedTokenAssetName,
-              depositTxId,
-              depositOutputIndex,
-              depositAmount: depositAmount.toString(),
-              proposalUrl,
-              proposalHash: parsedResult.proposal.anchor.hash,
-              isSpent: false, // All UTxOs we find are unspent
-              spentStatus: "available",
-            });
+          const proposalUrl = Buffer.from(
+            parsedResult.value.proposal.anchor.url,
+            "hex",
+          ).toString("utf-8");
 
-            console.log(`Token: ${expectedTokenAssetName.slice(0, 20)}...`);
-          } else {
-            console.log(`Failed to parse deposit datum`);
-          }
+          deposits.push({
+            tokenAssetName: expectedTokenAssetName,
+            depositTxId,
+            depositOutputIndex,
+            depositAmount: depositAmount.toString(),
+            proposalUrl,
+            // The off-chain metadata anchor hash (CIP-100/108 SHA of the
+            // anchor body). NOT the proposal-procedure hash. The
+            // procedure hash equals `expectedTokenAssetName` above.
+            anchorContentHash: parsedResult.value.proposal.anchor.hash,
+            proposalHash: expectedTokenAssetName,
+            isSpent: false, // All UTxOs we find are unspent
+            spentStatus: "available",
+          });
+
+          console.log(`Token: ${expectedTokenAssetName.slice(0, 20)}...`);
+        } else if (!parsedResult.ok) {
+          console.warn(
+            `Failed to parse deposit datum: reason=${parsedResult.reason}`,
+            parsedResult.error,
+          );
         } else {
-          console.log(`No inline datum found`);
+          console.log(`Deposit datum is in After state — skipping`);
         }
       } else {
-        console.log(`No datum found`);
+        console.log(`No inline datum found — skipping`);
       }
     }
 
@@ -236,7 +245,9 @@ const runStandaloneIndexer = async () => {
     console.log(`Deposits: ${depositIndex.totalDeposits} entries`);
     console.log(`Data saved to ./wallet-tokens.json and ./deposit-index.json`);
   } catch (error) {
-    console.error(`Error: ${error.message}`);
+    console.error(
+      `Error: ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exit(1);
   } finally {
     if (cardanoProvider) {

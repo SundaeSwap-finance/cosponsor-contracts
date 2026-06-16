@@ -1,6 +1,6 @@
 {
   "name": "@sundaeswap/cosponsor-sdk",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Cosponsor SDK for Cardano smart contract interactions",
   "main": "dist/index.mjs",
   "module": "dist/index.mjs",
@@ -34,6 +34,14 @@
     "./utils": {
       "import": "./dist/utils/index.mjs",
       "types": "./dist/utils/index.d.mts"
+    },
+    "./logger": {
+      "import": "./dist/logger.mjs",
+      "types": "./dist/logger.d.mts"
+    },
+    "./Config": {
+      "import": "./dist/Config.mjs",
+      "types": "./dist/Config.d.mts"
     }
   },
   "keywords": [
@@ -71,15 +79,14 @@
     "build:watch": "tsdown --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run clean && bun run build",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
     "format": "prettier --write \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
     "copy-to-ui": "bun run build && bun run dev/copy-to-ui.mjs",
     "configure": "bun run src/scripts/configure.ts",
     "deploy": "bun run src/scripts/deploy.ts",
     "deposit": "bun run src/scripts/deposit.ts",
-    "withdrawal": "bun run src/scripts/withdrawal.ts",
-    "withdraw-all": "bun run src/scripts/withdraw-all.ts",
     "mint-state-nft": "bun run src/scripts/mint-state-nft.ts",
     "generate-script-cbor": "bun run src/scripts/generate-script-cbor.ts",
     "inspect-deposit": "bun run src/helpers/inspect-deposit.ts",
@@ -87,16 +94,25 @@
     "index-deposits": "bun run src/helpers/depositIndexer.ts"
   },
   "devDependencies": {
+    "@sundaeswap/eslint-config": "^2.0.15",
     "@sundaeswap/prettier-config": "latest",
     "@types/bun": "latest",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.18.1",
+    "eslint": "^9",
+    "globals": "^17.6.0",
     "prettier": "^3.0.0",
     "tsdown": "^0.20.0-beta.3",
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "@blaze-cardano/sdk": "^0.2.43"
+  },
+  "peerDependenciesMeta": {
+    "@blaze-cardano/sdk": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@blaze-cardano/core": "^0.7.0",

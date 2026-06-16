@@ -11,7 +11,6 @@ import { Unwrapped } from "@blaze-cardano/ogmios";
 import {
   Bip32PrivateKey,
   Bip32PrivateKeyHex,
-  NetworkId,
   Address,
 } from "@blaze-cardano/core";
 import { mnemonicToEntropy } from "@scure/bip39";
