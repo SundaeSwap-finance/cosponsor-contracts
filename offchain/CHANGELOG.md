@@ -1,9 +1,9 @@
 # Changelog
 
-## 1.0.0-alpha.2
+## 0.0.2
 
 Pre-publish audit pass. Full validation notes per finding are in
-[`1.0.0-alpha.2.audit.md`](./1.0.0-alpha.2.audit.md). Highlights below are
+[`0.0.2.audit.md`](./0.0.2.audit.md). Highlights below are
 grouped by what a consumer (e.g. cosponsor-ui) needs to know.
 
 ### Consumer-visible / behavioral
