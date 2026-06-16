@@ -221,11 +221,6 @@ interface IWithdrawalArgs<P, W> {
 }
 ```
 
-## Auditing
-
-Security and code-health findings are tracked in [`AUDIT.md`](./AUDIT.md), with the
-pre-publish review for this release in [`0.0.2.audit.md`](./0.0.2.audit.md).
-
 ## License
 
 MIT

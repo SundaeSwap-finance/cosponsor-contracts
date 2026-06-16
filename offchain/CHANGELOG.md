@@ -2,9 +2,8 @@
 
 ## 0.0.2
 
-Pre-publish audit pass. Full validation notes per finding are in
-[`0.0.2.audit.md`](./0.0.2.audit.md). Highlights below are
-grouped by what a consumer (e.g. cosponsor-ui) needs to know.
+Pre-publish audit pass. Highlights below are grouped by what a consumer
+(e.g. cosponsor-ui) needs to know.
 
 ### Consumer-visible / behavioral
 
