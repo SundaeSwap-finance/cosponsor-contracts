@@ -12,11 +12,11 @@ npm install @sundaeswap/cosponsor-sdk
 
 The SDK ships two entry points with parallel functionality:
 
-| | Node (`@sundaeswap/cosponsor-sdk`) | Browser (`@sundaeswap/cosponsor-sdk/browser`) |
-| --- | --- | --- |
-| Deposit | `deposit({ blaze, cosponsoredProposal, depositAmount })` | `browserDeposit({ blaze, cosponsoredProposal, depositAmount })` |
-| Withdraw | `withdraw({ blaze, deposits })` | `browserWithdraw({ blaze, withdrawalPlan, withdrawAmount })` |
-| Provider | `CardanoProvider` (Blockfrost / Kupmios, reads env) | bring your own `Blaze` instance + injected wallet |
+|          | Node (`@sundaeswap/cosponsor-sdk`)                       | Browser (`@sundaeswap/cosponsor-sdk/browser`)                   |
+| -------- | -------------------------------------------------------- | --------------------------------------------------------------- |
+| Deposit  | `deposit({ blaze, cosponsoredProposal, depositAmount })` | `browserDeposit({ blaze, cosponsoredProposal, depositAmount })` |
+| Withdraw | `withdraw({ blaze, deposits })`                          | `browserWithdraw({ blaze, withdrawalPlan, withdrawAmount })`    |
+| Provider | `CardanoProvider` (Blockfrost / Kupmios, reads env)      | bring your own `Blaze` instance + injected wallet               |
 
 - The **Node** path is provider-driven (`CardanoProvider` reads Blockfrost/Kupmios config from env) and `withdraw` takes an explicit list of deposits.
 - The **Browser** path works against a `Blaze` instance you construct from a wallet (e.g. via a dApp connector); `browserWithdraw` takes a `withdrawalPlan` (from `fetchWithdrawalPlan`) plus an amount.

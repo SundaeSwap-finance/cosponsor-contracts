@@ -3,6 +3,7 @@
 Running record of changes being made in response to `AUDIT.md`. Nothing here is committed yet — this doc is the source of truth for what's queued up. Once a section is approved it gets squashed into a commit and removed from this file.
 
 Conventions:
+
 - Each entry references its `AUDIT.md` finding ID (F1–F30).
 - "Touched files" lists every file changed by the entry, so a commit can be staged precisely from this doc.
 - "Validation" notes the test(s) that prove the change is correct.
@@ -25,6 +26,7 @@ These two changes were in the working tree before this audit started; they remai
 Adds the first off-chain test scaffolding the SDK has ever had. Bun's built-in test runner is used (no new dependency); `bunfig.toml` already points `[test] root = "./tests"`.
 
 **Touched files:**
+
 - `offchain/package.json` — replaced `"test": "echo …"` with `"test": "bun test"` and added `"test:watch"`
 - `offchain/tests/schema-probe.test.ts` — validates all schema-vs-builder claims and adds a 7-variant `gADA asset-name equivalence` suite that's now the hard invariant for any future SDK change.
 
@@ -39,6 +41,7 @@ Adds the first off-chain test scaffolding the SDK has ever had. Bun's built-in t
 **Status:** DONE locally — descriptive only.
 
 **Touched files:**
+
 - `offchain/AUDIT.md` (new) — full audit document, 30 findings, fix order, method.
 - `offchain/AUDIT_CHANGES.md` (this file).
 
@@ -53,6 +56,7 @@ Adds the first off-chain test scaffolding the SDK has ever had. Bun's built-in t
 The pre-audit working-tree fix added `{ ctor: 0n }` to the outer `{ Constitution: ... }` wrapper, which stopped one throw but left an inner Object without a ctor AND introduced an extra Constr layer the Aiken validator never produces. Subsumed here with a collapse of the wrapper to match the manual builder exactly.
 
 **Touched files:**
+
 - `offchain/src/validators/GeneratedTypes/CosponsorTypes.ts:110-128` — schema now `constitution: Type.Object({ guardRails: Type.Optional(Type.String()) }, { ctor: 0n })`.
 - `offchain/src/validators/Types/GovernanceAction.ts:269-284` — `ToContractType.NewConstitution` no longer emits the `{ Constitution: ... }` wrapper.
 - `offchain/tests/schema-probe.test.ts` — flipped the F4 convergence test active.
@@ -70,6 +74,7 @@ The pre-audit working-tree fix added `{ ctor: 0n }` to the outer `{ Constitution
 Aiken `ProtocolVersion { major, minor }` is a plain ctor-0 record: `Constr(0, [major, minor])`. The schema had `newVersion: Type.Object({ ProtocolVersion: Type.Object({ major, minor }) }, { ctor: 0n })` — inner Object lacked ctor (throw site) and the wrapper added an extra Constr layer the on-chain encoding doesn't have.
 
 **Touched files:**
+
 - `offchain/src/validators/GeneratedTypes/CosponsorTypes.ts:60-77` — schema now `newVersion: Type.Object({ major: Type.BigInt(), minor: Type.BigInt() }, { ctor: 0n })`.
 - `offchain/src/validators/Types/GovernanceAction.ts:208-221` — `ToContractType.HardFork` no longer emits the `{ ProtocolVersion: ... }` wrapper.
 - `offchain/tests/schema-probe.test.ts` — flipped F3 convergence test active.
@@ -89,6 +94,7 @@ Aiken's `ProtocolParametersUpdate` is an **opaque** type — encoded as a bare C
 **Important note:** Must be `Type.Integer()`, not `Type.BigInt()`. TypeBox's `Type.Record` dispatch only recognises `IsInteger`/`IsNumber` as numeric-keyed and falls through to `Never` for `BigInt`. Discovered live by the convergence test failing with `01` (int 1) in the schema CBOR vs `a0` (empty map) in the builder CBOR.
 
 **Touched files:**
+
 - `offchain/src/validators/GeneratedTypes/CosponsorTypes.ts:46-67` — schema now `newParameters: Type.Record(Type.Integer(), TPlutusData)`.
 - `offchain/src/validators/Types/GovernanceAction.ts:191-205` — `ToContractType.ProtocolParameters` emits `newParameters: {}`.
 - `offchain/tests/schema-probe.test.ts` — flipped F1/F2 convergence test active.
@@ -110,6 +116,7 @@ This change makes the schema honestly declare these fields as `TPlutusData` pass
 Full schema-native support requires either extending `@blaze-cardano/data` to handle Constr-keyed Maps, OR retiring the schema serializer in favour of manual builders (the F7 decision).
 
 **Touched files:**
+
 - `offchain/src/validators/GeneratedTypes/CosponsorTypes.ts:79-114` — `beneficiaries` and `addedMembers` are now `TPlutusData`.
 - `offchain/src/validators/Types/GovernanceAction.ts:222-238, 248-264` — removed `as any` casts; `ToContractType` returns the `createBeneficiariesMap` result directly.
 
@@ -136,6 +143,7 @@ The audit recommended either (a) retiring the manual builders in favour of the s
 Also exported from `browser/index.ts` so consumers don't have to import the legacy `fetchUserDeposits` for its side effects (AUDIT.md F16).
 
 **Touched files:**
+
 - `offchain/src/browser/fetchUserDeposits.ts:381-540` — helper bodies rewritten with explicit null returns and clearer log messages.
 - `offchain/src/browser/index.ts:17-32` — exported the three decoder helpers + the `IScriptUtxo` type.
 - `offchain/tests/datum-decoder.test.ts` — new file. 9 tests covering Before / After / malformed datums for each helper.
@@ -151,12 +159,14 @@ Also exported from `browser/index.ts` so consumers don't have to import the lega
 **Status:** DONE — covered by schema-probe tests (no regression) and new datum-decoder tests.
 
 `IScriptUtxo` previously stored empty strings for `proposalHash` / `actionKind` / `anchor` when the datum couldn't be decoded, indistinguishable from "decoded successfully but the field is naturally empty". Added two diagnostic fields:
+
 - `decodingFailed: boolean` — set when any of the three decoder helpers returned `null` for a UTxO that DID have an inline datum.
 - `hasDatum: boolean` — distinguishes "no datum at all" from "datum present but couldn't decode".
 
 The string fields stay (for backwards compat) but are now defensible: empty means "no information available, check the diagnostic flags".
 
 **Touched files:**
+
 - `offchain/src/browser/fetchUserDeposits.ts:522-555` — `IScriptUtxo` interface, expanded fields with documentation.
 - `offchain/src/browser/fetchUserDeposits.ts:628-693` — `fetchWithdrawalPlan` iteration rewritten to set the diagnostic flags from the decoder helpers' null/non-null returns.
 
@@ -173,6 +183,7 @@ When `fetchUserDeposits` couldn't match a user's gADA token to a decoded script 
 `IUserDeposit` gains an `unmatched: boolean` field. Unmatched deposits surface with empty anchor data, `action.kind = "Unknown"`, and `unmatched: true` — UI is expected to render an "unknown proposal" state rather than guess.
 
 **Touched files:**
+
 - `offchain/src/browser/fetchUserDeposits.ts:777-810` — `IUserDeposit` interface, added `unmatched`.
 - `offchain/src/browser/fetchUserDeposits.ts:838-895` — match-or-surface-as-unmatched, no more `selectUtxosForWithdrawal` fallback for identity.
 
@@ -187,11 +198,13 @@ When `fetchUserDeposits` couldn't match a user's gADA token to a decoded script 
 **Status:** DONE & VERIFIED — 3 dedicated tests in `datum-decoder.test.ts`.
 
 Three related issues in one helper:
+
 - **F9** — `} catch { return null; }` swallowed every error with no logging. Replaced with a discriminated `ParseCosponsorDatumResult = { ok: true, value } | { ok: false, reason: 'parse-threw' | 'unexpected-shape', error? }`. Callers now choose their policy explicitly.
-- **F10** — `action: cosponsoredProposal.procedure?.governanceAction || { kind: "Unknown" }` was wrong when the action *was* present, because parse() returns `{TreasuryWithdrawal: {...}}` or string `"NicePoll"` — neither has a `.kind`. Added `fromContractType(parsed): TGovernanceAction` in `validators/Types/GovernanceAction.ts` as the proper inverse of `ToContractType`, and routed parseCosponsorDatum through it.
+- **F10** — `action: cosponsoredProposal.procedure?.governanceAction || { kind: "Unknown" }` was wrong when the action _was_ present, because parse() returns `{TreasuryWithdrawal: {...}}` or string `"NicePoll"` — neither has a `.kind`. Added `fromContractType(parsed): TGovernanceAction` in `validators/Types/GovernanceAction.ts` as the proper inverse of `ToContractType`, and routed parseCosponsorDatum through it.
 - **F11** — `if (datum === "After" || "After" in datum)` was inside a `typeof datum === "object"` guard so the first half was unreachable. Lifted the `=== "After"` check above the guard.
 
 **Touched files:**
+
 - `offchain/src/validators/Types/GovernanceAction.ts:298-393` — new `fromContractType` function with documentation about the `Pairs<Credential, V>` placeholder caveat (callers re-serializing should use `rawCosponsoredProposal` directly).
 - `offchain/src/helpers/parseCosponsorDatum.ts` — rewritten end to end with the discriminated result shape and reachability fix.
 - `offchain/src/helpers/depositIndexer.ts:117-160` — updated caller to use `result.ok` / `result.value` pattern; also added the missing `CosponsorTypes` import (AUDIT.md F18) and renamed the misleading `proposalHash: anchor.hash` to `anchorContentHash` (AUDIT.md F19).
@@ -211,6 +224,7 @@ Three related issues in one helper:
 Pre-audit `getProposalHash` in `fetch-submissions.ts` returned `${proposal.deposit}_${proposal.anchor.hash.slice(0, 8)}` on failure — a synthetic string that collides across distinct proposals and is not a valid token-asset-name format. Removed; lets the error propagate. Callers in `fetch-submissions.ts` now catch the throw and store a sentinel that's clearly labelled `"uncomputed_<txid>"` (vs the old behaviour of looking like a real hash).
 
 **Touched files:**
+
 - `offchain/src/helpers/fetch-submissions.ts:99-115` — fallback deleted from helper.
 - `offchain/src/helpers/fetch-submissions.ts:186-218` — caller catches and labels explicitly.
 
@@ -243,6 +257,7 @@ Folded into the parseCosponsorDatum cascade above (Change 10) so the import + fi
 - **F23** — `fromContractType` (added in Change 10) is now re-exported from `browser/index.ts`.
 
 **Touched files:**
+
 - `offchain/src/validators/Types/GovernanceAction.ts` — added `computeProposalAssetName`.
 - `offchain/src/browser/scriptAddress.ts` — new file.
 - `offchain/src/browser/index.ts` — re-exports `getCosponsorScriptAddress`, `getStateScriptAddress`, `computeProposalAssetName`, `fromContractType`.
@@ -259,6 +274,7 @@ Folded into the parseCosponsorDatum cascade above (Change 10) so the import + fi
 `BrowserDeposit.ts` previously only verified `script.hash() === cosponsorHash` on the Blockfrost fallback. The primary Kupo+Ogmios path used whatever `resolveScriptRef` returned without checking. Added the same verification (plus a "no script attached" guard) before attaching the reference input.
 
 **Touched files:**
+
 - `offchain/src/browser/BrowserDeposit.ts:66-95` — verify-then-use on the success branch.
 
 **Commit shape:** `Verify script-ref hash on the Kupo+Ogmios deposit path (F26)`
@@ -289,4 +305,3 @@ Exact pins for `@blaze-cardano/*`. Document tested versions in README.
 ## Queued — Cosmetic (F27, F28)
 
 Rename `guardRails` → `guardrails`, reorder `OutputReference` TS interface to match schema.
-
