@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import dotenv from "dotenv";
 import { Core } from "@blaze-cardano/sdk";
 import { CardanoProvider } from "@utils/provider";
@@ -92,52 +91,30 @@ const inspectDeposit = async (depositTxHash: string) => {
             console.log(`    Native Assets:`);
             let assetsInThisOutput = 0;
 
-            for (const [policyId, assets] of multiasset.entries()) {
+            // blaze's multiasset() is a flat Map<assetId, bigint>, where
+            // assetId is the 56-hex policy id concatenated with the asset-name
+            // hex (NOT a nested Map<policyId, Map<assetName, amount>>).
+            for (const [assetId, amount] of multiasset.entries()) {
+              assetsInThisOutput++;
+              totalTokensFound++;
+              const policyId = assetId.slice(0, 56);
+              const assetName = assetId.slice(56);
               console.log(`      Policy: ${policyId}`);
+              console.log(`        Asset: ${assetName}`);
+              console.log(`        Amount: ${amount}`);
 
-              // Check if assets has entries method or try different access patterns
-              if (assets && typeof assets.entries === "function") {
-                for (const [assetName, amount] of assets.entries()) {
-                  assetsInThisOutput++;
-                  totalTokensFound++;
-                  console.log(`        Asset: ${assetName}`);
-                  console.log(`        Amount: ${amount}`);
-
-                  // Check if this matches our expected gAda token
-                  if (policyId === cosponsor.script().hash()) {
-                    console.log(`        🎯 POLICY MATCH!`);
-                    if (assetName === cosponsor.gAda()) {
-                      console.log(
-                        `        🎯 ASSET NAME MATCH! This is gAda token! Amount: ${amount}`,
-                      );
-                    } else {
-                      console.log(
-                        `        Asset name differs from expected: ${cosponsor.gAda()}`,
-                      );
-                    }
-                  }
+              // Check if this matches our expected gAda token
+              if (policyId === cosponsor.script().hash()) {
+                console.log(`        POLICY MATCH!`);
+                if (assetName === cosponsor.gAda()) {
+                  console.log(
+                    `        ASSET NAME MATCH! This is gAda token! Amount: ${amount}`,
+                  );
+                } else {
+                  console.log(
+                    `        Asset name differs from expected: ${cosponsor.gAda()}`,
+                  );
                 }
-              } else if (assets && typeof assets.keys === "function") {
-                // Try alternative access method
-                for (const assetName of assets.keys()) {
-                  const amount = assets.get(assetName);
-                  assetsInThisOutput++;
-                  totalTokensFound++;
-                  console.log(`        Asset (alt): ${assetName}`);
-                  console.log(`        Amount (alt): ${amount}`);
-
-                  if (
-                    policyId === cosponsor.script().hash() &&
-                    assetName === cosponsor.gAda()
-                  ) {
-                    console.log(
-                      `        🎯 FOUND gAda token (alt method)! Amount: ${amount}`,
-                    );
-                  }
-                }
-              } else {
-                console.log(`        Assets object type:`, typeof assets);
-                console.log(`        Assets:`, assets);
               }
             }
 
@@ -150,7 +127,9 @@ const inspectDeposit = async (depositTxHash: string) => {
           break;
         }
       } catch (e) {
-        console.log(`  Output ${i}: Error - ${e.message}`);
+        console.log(
+          `  Output ${i}: Error - ${e instanceof Error ? e.message : String(e)}`,
+        );
         break;
       }
     }

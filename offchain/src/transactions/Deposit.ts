@@ -10,6 +10,8 @@ import {
   SCRIPT_REFERENCE_ADDRESS,
 } from "@/Config.js";
 import { Cosponsor, ICosponsoredProposal } from "@validators/Cosponsor.js";
+import { chunkCip25Text } from "@/utils/cip25.js";
+import { logger } from "../logger.js";
 import { CosponsorState } from "@validators/CosponsorState.js";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
 import { serialize } from "@blaze-cardano/data";
@@ -26,6 +28,14 @@ export const deposit = async <P extends Provider, W extends Wallet>({
   cosponsoredProposal,
   depositAmount,
 }: IDepositArgs<P, W>): Promise<TxBuilder> => {
+  // Logger checkpoints mirror the browser path so `setLoggerEnabled(true)`
+  // gives comparable output for either entry point (audit L6).
+  logger.debug(
+    "[deposit] building deposit tx,",
+    depositAmount.toString(),
+    "lovelace, action",
+    cosponsoredProposal.action.kind,
+  );
   const tx = blaze.newTransaction();
 
   const cosponsorState = new CosponsorState(
@@ -52,6 +62,7 @@ export const deposit = async <P extends Provider, W extends Wallet>({
   }
 
   tx.addReferenceInput(cosponsorReference);
+  logger.debug("[deposit] cosponsor script reference resolved");
 
   // Also get reference to the CosponsorState script
   const cosponsorStateReference = await blaze.provider.resolveScriptRef(
@@ -81,6 +92,7 @@ export const deposit = async <P extends Provider, W extends Wallet>({
   // Create CIP-25 compliant metadata using Blaze Core types
   const tokenAssetName = cosponsor.gAda();
   const policyId = cosponsor.script().hash();
+  logger.debug("[deposit] gADA token asset name:", tokenAssetName);
 
   try {
     // Create CIP-25 metadata using the correct Blaze Core approach
@@ -106,31 +118,11 @@ export const deposit = async <P extends Provider, W extends Wallet>({
     `,
     ).toString("base64")}`;
 
-    // Chunk the image data to fit 64-byte limit
-    const chunkImageData = (value: string): Core.Metadatum => {
-      if (Buffer.from(value, "utf8").length <= 64) {
-        return Core.Metadatum.newText(value);
-      } else {
-        // Split into chunks that fit in 64 bytes
-        const chunks = new Core.MetadatumList();
-        for (let i = 0; i < value.length; i += 64) {
-          let j = 0;
-          // Find the largest chunk that fits in 64 bytes
-          while (
-            Buffer.from(value.substring(i, i + 64 - j), "utf8").length > 64
-          ) {
-            j++;
-          }
-          chunks.add(Core.Metadatum.newText(value.substring(i, i + 64 - j)));
-          i -= j;
-        }
-        return Core.Metadatum.newList(chunks);
-      }
-    };
-
+    // Chunk the image data to fit the 64-byte CIP-25 limit (shared helper —
+    // audit H10; was a local copy of the brittle chunker).
     tokenMetadataMap.insert(
       Core.Metadatum.newText("image"),
-      chunkImageData(svgImage),
+      chunkCip25Text(svgImage),
     );
 
     // Optional: description
@@ -210,7 +202,10 @@ export const deposit = async <P extends Provider, W extends Wallet>({
     cosponsor.datum(),
   );
 
+  logger.debug("[deposit] minting gADA + locking deposit at script address");
+
   tx.setChangeAddress(await blaze.wallet.getChangeAddress());
 
+  logger.debug("[deposit] deposit tx built");
   return tx;
 };

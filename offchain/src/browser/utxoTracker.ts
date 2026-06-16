@@ -1,4 +1,3 @@
-
 import { Core } from "@blaze-cardano/sdk";
 
 import { logger } from "../logger.js";
@@ -12,16 +11,49 @@ interface TrackedUtxo {
   txHash: string;
   outputIndex: number;
   utxo: Core.TransactionUnspentOutput;
+  /** Epoch ms when this entry was recorded; used for TTL sweeping. */
+  createdAt: number;
 }
 
 interface SpentUtxo {
   txHash: string;
   outputIndex: number;
+  /** Hash of the submitted tx that spent this UTxO; used by clearTransaction. */
+  submittedTxHash: string;
+  /** Epoch ms when this entry was recorded; used for TTL sweeping. */
+  createdAt: number;
 }
+
+/**
+ * Default time-to-live for pending-UTxO tracking entries (10 minutes —
+ * conservative; Cardano txs typically confirm in 20-60s). Tune per-instance
+ * via `pendingUtxoTracker.ttlMs` (e.g. `= 120_000` for 2 min). (audit H7)
+ */
+export const PENDING_TTL_MS = 10 * 60 * 1000;
 
 class PendingUtxoTracker {
   private spentUtxos: SpentUtxo[] = [];
   private createdUtxos: TrackedUtxo[] = [];
+  /** Entries older than this are swept before each record/apply. */
+  ttlMs = PENDING_TTL_MS;
+
+  /**
+   * Drop tracking entries older than `ttlMs`. A long-running SPA session can
+   * otherwise accumulate dead entries indefinitely — only clearAll()/
+   * clearTransaction() reset them, and cross-page navigation preserves state.
+   */
+  private sweepExpired() {
+    const cutoff = Date.now() - this.ttlMs;
+    const before = this.spentUtxos.length + this.createdUtxos.length;
+    this.spentUtxos = this.spentUtxos.filter((s) => s.createdAt >= cutoff);
+    this.createdUtxos = this.createdUtxos.filter((c) => c.createdAt >= cutoff);
+    const swept = before - (this.spentUtxos.length + this.createdUtxos.length);
+    if (swept > 0) {
+      logger.debug(
+        `Swept ${swept} expired pending UTxO tracking entr${swept === 1 ? "y" : "ies"} (older than ${this.ttlMs}ms)`,
+      );
+    }
+  }
 
   /**
    * Record a transaction's effects on UTxOs
@@ -30,9 +62,13 @@ class PendingUtxoTracker {
   recordTransaction(
     submittedTxHash: string,
     spentInputs: { txHash: string; outputIndex: number }[],
-    createdOutputs: { outputIndex: number; utxo: Core.TransactionUnspentOutput }[],
+    createdOutputs: {
+      outputIndex: number;
+      utxo: Core.TransactionUnspentOutput;
+    }[],
   ) {
-    logger.debug(`📝 Recording tx ${submittedTxHash.slice(0, 16)}... effects:`);
+    this.sweepExpired();
+    logger.debug(`Recording tx ${submittedTxHash.slice(0, 16)}... effects:`);
     logger.debug(`   - ${spentInputs.length} UTxO(s) spent`);
     logger.debug(`   - ${createdOutputs.length} script UTxO(s) created`);
 
@@ -42,15 +78,20 @@ class PendingUtxoTracker {
       this.spentUtxos.push({
         txHash: input.txHash,
         outputIndex: input.outputIndex,
+        submittedTxHash,
+        createdAt: Date.now(),
       });
 
       // Remove from createdUtxos if this was a pending UTxO we were tracking
       const beforeCount = this.createdUtxos.length;
       this.createdUtxos = this.createdUtxos.filter(
-        (c) => !(c.txHash === input.txHash && c.outputIndex === input.outputIndex),
+        (c) =>
+          !(c.txHash === input.txHash && c.outputIndex === input.outputIndex),
       );
       if (this.createdUtxos.length < beforeCount) {
-        logger.debug(`   🔄 Removed spent pending UTxO: ${input.txHash.slice(0, 16)}...#${input.outputIndex}`);
+        logger.debug(
+          `   Removed spent pending UTxO: ${input.txHash.slice(0, 16)}...#${input.outputIndex}`,
+        );
       }
     }
 
@@ -58,13 +99,15 @@ class PendingUtxoTracker {
     // Avoid duplicates (can happen with React strict mode double-invoke)
     for (const output of createdOutputs) {
       const alreadyTracked = this.createdUtxos.some(
-        (c) => c.txHash === submittedTxHash && c.outputIndex === output.outputIndex,
+        (c) =>
+          c.txHash === submittedTxHash && c.outputIndex === output.outputIndex,
       );
       if (!alreadyTracked) {
         this.createdUtxos.push({
           txHash: submittedTxHash,
           outputIndex: output.outputIndex,
           utxo: output.utxo,
+          createdAt: Date.now(),
         });
       }
     }
@@ -92,13 +135,16 @@ class PendingUtxoTracker {
   applyToUtxoList(
     utxos: Core.TransactionUnspentOutput[],
   ): Core.TransactionUnspentOutput[] {
+    this.sweepExpired();
     // Filter out spent UTxOs
     const filtered = utxos.filter((utxo) => {
       const txHash = utxo.input().transactionId();
       const outputIndex = Number(utxo.input().index());
       const spent = this.isSpent(txHash, outputIndex);
       if (spent) {
-        logger.debug(`   🔄 Excluding spent UTxO: ${txHash.slice(0, 16)}...#${outputIndex}`);
+        logger.debug(
+          `   Excluding spent UTxO: ${txHash.slice(0, 16)}...#${outputIndex}`,
+        );
       }
       return !spent;
     });
@@ -120,15 +166,21 @@ class PendingUtxoTracker {
       if (!existingIds.has(id)) {
         newPending.push(tracked.utxo);
         existingIds.add(id); // Prevent duplicates within pending list too
-        logger.debug(`   🔄 Adding pending UTxO: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
+        logger.debug(
+          `   Adding pending UTxO: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`,
+        );
       } else {
         // UTxO is already in the list (tx was confirmed), remove from tracking
-        logger.debug(`   ✅ Pending UTxO already confirmed: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`);
+        logger.debug(
+          `   Pending UTxO already confirmed: ${tracked.txHash.slice(0, 16)}...#${tracked.outputIndex}`,
+        );
       }
     }
 
     const result = [...filtered, ...newPending];
-    logger.debug(`   📋 Final UTxO count: ${result.length} (${filtered.length} from provider + ${newPending.length} pending)`);
+    logger.debug(
+      `   Final UTxO count: ${result.length} (${filtered.length} from provider + ${newPending.length} pending)`,
+    );
     return result;
   }
 
@@ -137,10 +189,10 @@ class PendingUtxoTracker {
    */
   clearTransaction(txHash: string) {
     this.spentUtxos = this.spentUtxos.filter(
-      (s) => !this.createdUtxos.some((c) => c.txHash === txHash),
+      (s) => s.submittedTxHash !== txHash,
     );
     this.createdUtxos = this.createdUtxos.filter((c) => c.txHash !== txHash);
-    logger.debug(`🧹 Cleared tracking for tx ${txHash.slice(0, 16)}...`);
+    logger.debug(`Cleared tracking for tx ${txHash.slice(0, 16)}...`);
   }
 
   /**
@@ -149,7 +201,7 @@ class PendingUtxoTracker {
   clearAll() {
     this.spentUtxos = [];
     this.createdUtxos = [];
-    logger.debug("🧹 Cleared all UTxO tracking");
+    logger.debug("Cleared all UTxO tracking");
   }
 
   /**
@@ -163,7 +215,14 @@ class PendingUtxoTracker {
   }
 }
 
-// Singleton instance for the session
+/**
+ * Process-wide singleton tracker. Lifecycle notes (audit H7):
+ * - Survives module HMR and SPA page navigation; it is NOT reset automatically.
+ * - Entries self-expire after `ttlMs` (default {@link PENDING_TTL_MS}); tune via
+ *   `pendingUtxoTracker.ttlMs`.
+ * - Call `clearAll()` on wallet disconnect / account switch to drop stale state
+ *   immediately rather than waiting for the TTL sweep.
+ */
 export const pendingUtxoTracker = new PendingUtxoTracker();
 
 /**
@@ -189,7 +248,10 @@ export function extractTransactionEffects(
   // Get created outputs - ONLY track script outputs (those with datums)
   // Wallet outputs should not be tracked as they can't be spent with redeemers
   const outputs = body.outputs();
-  const createdOutputs: { outputIndex: number; utxo: Core.TransactionUnspentOutput }[] = [];
+  const createdOutputs: {
+    outputIndex: number;
+    utxo: Core.TransactionUnspentOutput;
+  }[] = [];
 
   for (let i = 0; i < outputs.length; i++) {
     const output = outputs[i];
@@ -208,7 +270,7 @@ export function extractTransactionEffects(
     const utxo = new Core.TransactionUnspentOutput(input, output);
     createdOutputs.push({ outputIndex: i, utxo });
 
-    logger.debug(`   📦 Tracking script output #${i} (has datum)`);
+    logger.debug(`   Tracking script output #${i} (has datum)`);
   }
 
   return { spentInputs, createdOutputs };

@@ -11,7 +11,6 @@ import { Unwrapped } from "@blaze-cardano/ogmios";
 import {
   Bip32PrivateKey,
   Bip32PrivateKeyHex,
-  NetworkId,
   Address,
 } from "@blaze-cardano/core";
 import { mnemonicToEntropy } from "@scure/bip39";
@@ -157,7 +156,10 @@ export class CardanoProvider {
         this.config.wallet.seedPhrase,
         wordlist,
       );
-      const rootKey = Bip32PrivateKey.fromBip39Entropy(Buffer.from(entropy), "");
+      const rootKey = Bip32PrivateKey.fromBip39Entropy(
+        Buffer.from(entropy),
+        "",
+      );
       wallet = await HotWallet.fromMasterkey(rootKey.hex(), this.provider);
     } else if (this.config.wallet.privateKey) {
       this.log("Using private key from environment");

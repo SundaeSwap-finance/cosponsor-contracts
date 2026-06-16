@@ -9,6 +9,10 @@ export default defineConfig({
     "src/validators/Types/index.ts",
     "src/validators/GeneratedTypes/index.ts",
     "src/utils/index.ts",
+    // Standalone entries so `./logger` and `./Config` subpaths resolve to
+    // stable dist filenames (audit L9).
+    "src/logger.ts",
+    "src/Config.ts",
   ],
   format: ["esm"],
   dts: true,
@@ -16,6 +20,4 @@ export default defineConfig({
   sourcemap: true,
   target: "es2020",
   outDir: "dist",
-  // Preserve directory structure for deep imports
-  splitting: false,
 });

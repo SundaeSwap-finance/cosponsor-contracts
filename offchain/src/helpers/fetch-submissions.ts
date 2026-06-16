@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import dotenv from "dotenv";
 import { CardanoProvider } from "@utils/provider";
 import { Cosponsor, ICosponsoredProposal } from "@validators/Cosponsor";
@@ -9,7 +8,10 @@ import {
   PROTOCOL_BOOT_TRANSACTION_INDEX,
 } from "@/Config";
 import { Core } from "@blaze-cardano/sdk";
+import { serialize } from "@blaze-cardano/data";
+import { CosponsorTypes } from "@validators/GeneratedTypes";
 import { parseCosponsorDatum } from "@helpers/parseCosponsorDatum";
+import { extractInlineDatum } from "@helpers/datumUtils";
 
 dotenv.config();
 
@@ -23,7 +25,7 @@ interface ISubmissionInfo {
     proposal: ICosponsoredProposal;
     datumType: "Before" | "After";
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   rawDatum?: any;
   validationStatus?: "valid" | "malformed" | "unknown";
   validationReason?: string;
@@ -48,7 +50,7 @@ interface IMalformedSubmission {
   adaAmount: bigint;
   address: string;
   reason: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   rawDatum?: any;
 }
 
@@ -64,6 +66,125 @@ interface IFetchResult {
     malformedAda: bigint;
   };
 }
+
+// The outcome of decoding one script UTxO's datum, plus its structural
+// validation. Kept as a plain value (no on-chain calls) so the valid-vs-
+// malformed routing can be unit-tested without a live provider — see
+// `groupClassifiedSubmissions`.
+export interface IClassifiedSubmission {
+  txHash: string;
+  outputIndex: number;
+  adaAmount: bigint;
+  address: string;
+
+  rawDatum?: any;
+  decode:
+    | {
+        ok: true;
+        proposalHash: string;
+        proposal: ICosponsoredProposal;
+        datumType: "Before" | "After";
+      }
+    | { ok: false; reason: string };
+  // Structural validation (e.g. UTxO still unspent). Only meaningful when
+  // `decode.ok` is true; ignored otherwise.
+  validation: { isValid: boolean; reason?: string };
+}
+
+// Pure grouping of classified submissions.
+//
+// Audit C1: a UTxO whose datum cannot be decoded into a cosponsor proposal
+// has no real proposal identity. Such UTxOs are surfaced as `malformed` and
+// skipped — never fabricated into a synthetic `unknown_<txid>` group with a
+// placeholder `{ anchor: "unknown", action: { kind: "Unknown" } }`. The old
+// behaviour collided distinct failed deposits (e.g. two outputs of the same
+// tx) under one key, mislabelling them as a single "proposal".
+export const groupClassifiedSubmissions = (
+  classified: IClassifiedSubmission[],
+): IFetchResult => {
+  const groupedSubmissions: IGroupedSubmissions = {};
+  const malformedSubmissions: IMalformedSubmission[] = [];
+
+  let totalAda = 0n;
+  let validAda = 0n;
+  let malformedAda = 0n;
+
+  const pushMalformed = (item: IClassifiedSubmission, reason: string) => {
+    malformedSubmissions.push({
+      txHash: item.txHash,
+      outputIndex: item.outputIndex,
+      adaAmount: item.adaAmount,
+      address: item.address,
+      reason,
+      rawDatum: item.rawDatum,
+    });
+    malformedAda += item.adaAmount;
+  };
+
+  for (const item of classified) {
+    totalAda += item.adaAmount;
+
+    // Decode failure: cannot form a real proposal identity — skip, don't group.
+    if (!item.decode.ok) {
+      pushMalformed(item, item.decode.reason);
+      continue;
+    }
+
+    // Structural validation failure (e.g. UTxO already spent).
+    if (!item.validation.isValid) {
+      pushMalformed(
+        item,
+        item.validation.reason || "Unknown validation failure",
+      );
+      continue;
+    }
+
+    validAda += item.adaAmount;
+
+    const { proposalHash, proposal, datumType } = item.decode;
+    const submissionInfo: ISubmissionInfo = {
+      txHash: item.txHash,
+      outputIndex: item.outputIndex,
+      adaAmount: item.adaAmount,
+      address: item.address,
+      proposalHash,
+      parsedDatum: { proposal, datumType },
+      rawDatum: item.rawDatum,
+      validationStatus: "valid",
+    };
+
+    if (!groupedSubmissions[proposalHash]) {
+      groupedSubmissions[proposalHash] = {
+        proposalHash,
+        proposal,
+        submissions: [],
+        totalAda: 0n,
+        submissionCount: 0,
+        status: datumType === "After" ? "Completed" : "Active",
+      };
+    }
+
+    groupedSubmissions[proposalHash].submissions.push(submissionInfo);
+    groupedSubmissions[proposalHash].totalAda += item.adaAmount;
+    groupedSubmissions[proposalHash].submissionCount++;
+  }
+
+  return {
+    validSubmissions: groupedSubmissions,
+    malformedSubmissions,
+    totalStats: {
+      totalUTxOs: classified.length,
+      validUTxOs: Object.values(groupedSubmissions).reduce(
+        (sum, group) => sum + group.submissionCount,
+        0,
+      ),
+      malformedUTxOs: malformedSubmissions.length,
+      totalAda,
+      validAda,
+      malformedAda,
+    },
+  };
+};
 
 // Helper function to validate deposit structure - simplified to just check if script UTxO exists
 const validateDepositStructure = async (
@@ -91,30 +212,31 @@ const validateDepositStructure = async (
     // If script UTxO exists, consider it valid - we'll handle gAda tokens during withdrawal
     return { isValid: true };
   } catch (error) {
-    return { isValid: false, reason: `Validation error: ${error.message}` };
+    return {
+      isValid: false,
+      reason: `Validation error: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 };
 
-// Helper function to extract proposal hash from cosponsor proposal
-const getProposalHash = (proposal: ICosponsoredProposal): string => {
-  try {
-    // Create a cosponsor instance with this proposal to get the hash
-    const cosponsorState = new CosponsorState(
-      PROTOCOL_BOOT_TRANSACTION_ID,
-      PROTOCOL_BOOT_TRANSACTION_INDEX,
-      PROPOSAL_LIFETIME,
-    );
+// Helper function to extract proposal hash from cosponsor proposal.
+// Throws on failure rather than fabricating a synthetic key — pre-audit
+// code returned `${proposal.deposit}_${proposal.anchor.hash.slice(0, 8)}`
+// on error, which collides across distinct proposals (AUDIT.md F14).
+//
+// Audit H1: hash the RAW parsed procedure (the exact on-chain bytes), NOT a
+// rebuild from the typed action. `fromContractType` is intentionally lossy for
+// the Pairs-typed fields (TreasuryWithdrawal `beneficiaries` /
+// ConstitutionalCommittee `addedMembers`), so the old `Cosponsor.new(...).gAda()`
+// rebuild produced a WRONG gADA hash for those variants. `serialize`-ing the
+// preserved `rawCosponsoredProposal` matches the on-chain token name exactly,
+// the same way `depositIndexer` already computes it.
+const getProposalHash = (rawCosponsoredProposal: unknown): string => {
+  return serialize(
+    CosponsorTypes.CosponsoredProposalProcedure,
 
-    const cosponsor = Cosponsor.new({
-      statePolicyId: cosponsorState.script().hash(),
-      cosponsoredProposal: proposal,
-    });
-
-    return cosponsor.gAda(); // This returns the hash of the proposal
-  } catch (error) {
-    // Fallback to a simple hash of the proposal data
-    return `${proposal.deposit}_${proposal.anchor.hash.slice(0, 8)}`;
-  }
+    rawCosponsoredProposal as any,
+  ).hash();
 };
 
 export const fetchAllSubmissions = async (
@@ -144,167 +266,130 @@ export const fetchAllSubmissions = async (
     const scriptUtxos = await blaze.provider.getUnspentOutputs(scriptAddress);
     console.log(`Found ${scriptUtxos.length} UTxOs at script address`);
 
-    const groupedSubmissions: IGroupedSubmissions = {};
-    const malformedSubmissions: IMalformedSubmission[] = [];
-
-    let totalAda = 0n;
-    let validAda = 0n;
-    let malformedAda = 0n;
+    // Scan each UTxO into a provider-free `IClassifiedSubmission`, then hand
+    // the whole batch to `groupClassifiedSubmissions` for the valid/malformed
+    // routing (audit C1 — decode failures no longer fabricate a group).
+    const classified: IClassifiedSubmission[] = [];
 
     for (let i = 0; i < scriptUtxos.length; i++) {
       const utxo = scriptUtxos[i];
       const output = utxo.output();
       const adaAmount = output.amount().coin();
+      const txHash = utxo.input().transactionId();
+      const outputIndex = Number(utxo.input().index());
 
       console.log(`\n--- UTxO ${i + 1} ---`);
-      console.log(`  Transaction: ${utxo.input().transactionId()}`);
-      console.log(`  Output Index: ${utxo.input().index()}`);
+      console.log(`  Transaction: ${txHash}`);
+      console.log(`  Output Index: ${outputIndex}`);
       console.log(
         `  ADA Amount: ${adaAmount} lovelace (${adaAmount / 1_000_000n} ADA)`,
       );
 
-      totalAda += adaAmount;
-
-      // Try to parse datum information
-      let proposalHash = "unknown";
-      let parsedDatum: {
-        proposal: ICosponsoredProposal;
-        datumType: "Before" | "After";
-      } | null = null;
+      let decode: IClassifiedSubmission["decode"];
       let rawDatum: any = null;
 
       try {
         const datum = output.datum();
-        console.log(`  🔍 Datum kind: ${datum ? datum.kind() : "null"}`);
+        console.log(`  Datum kind: ${datum ? datum.kind() : "null"}`);
 
-        if (datum && datum.kind() === 1) {
-          // 1 = inline
-          const datumData = datum.asInlineData();
-          if (datumData) {
-            console.log(`  📄 Found inline datum, parsing...`);
-            rawDatum = datumData;
+        const inlineDatum = extractInlineDatum(datum);
+        if (inlineDatum) {
+          console.log(`  Found inline datum, parsing...`);
+          rawDatum = inlineDatum;
 
-            // Parse the cosponsor datum
-            parsedDatum = parseCosponsorDatum(datumData);
+          const parseResult = parseCosponsorDatum(inlineDatum);
 
-            if (parsedDatum) {
-              proposalHash = getProposalHash(parsedDatum.proposal);
-              console.log(`  ✓ Parsed ${parsedDatum.datumType} datum`);
-              console.log(
-                `  📋 Proposal Hash: ${proposalHash.slice(0, 16)}...`,
-              );
-              console.log(
-                `  🎯 Action: ${parsedDatum.proposal.action?.kind || "Unknown"}`,
-              );
-              console.log(
-                `  🔗 Anchor: ${parsedDatum.proposal.anchor.url.slice(0, 50)}...`,
-              );
-            } else {
-              console.log(`  ❌ Could not parse datum`);
-              proposalHash = `unknown_${utxo.input().transactionId().slice(0, 8)}`;
+          if (parseResult.ok) {
+            const parsed = parseResult.value;
+            let proposalHash: string;
+            try {
+              proposalHash = getProposalHash(parsed.rawCosponsoredProposal);
+            } catch (hashErr) {
+              console.warn(`  Could not compute proposal hash:`, hashErr);
+              proposalHash = `uncomputed_${txHash.slice(0, 8)}`;
             }
+            console.log(`  Parsed ${parsed.datumType} datum`);
+            console.log(`  Proposal Hash: ${proposalHash.slice(0, 16)}...`);
+            console.log(
+              `  Action: ${parsed.proposal.action?.kind || "Unknown"}`,
+            );
+            console.log(
+              `  Anchor: ${parsed.proposal.anchor.url.slice(0, 50)}...`,
+            );
+            decode = {
+              ok: true,
+              proposalHash,
+              proposal: parsed.proposal,
+              datumType: parsed.datumType,
+            };
           } else {
-            console.log(`  ❌ Inline datum data is null`);
-            proposalHash = `null_datum_${utxo.input().transactionId().slice(0, 8)}`;
+            decode = {
+              ok: false,
+              reason: `datum decode failed: ${parseResult.reason}`,
+            };
           }
-        } else if (datum && datum.kind() === 0) {
-          // 0 = hash
-          console.log(`  🔗 Found datum hash: ${datum.asDataHash()}`);
-          proposalHash = `hash_datum_${utxo.input().transactionId().slice(0, 8)}`;
         } else {
-          console.log(`  ❌ No datum found`);
-          proposalHash = `no_datum_${utxo.input().transactionId().slice(0, 8)}`;
+          // No inline PlutusData to decode. Keep a distinct reason for the
+          // malformed record (C1 surfaces these; H3 standardises extraction).
+          const reason = !datum
+            ? "no datum present"
+            : datum.kind() === 0
+              ? `datum is hash-only (no inline datum): ${datum.asDataHash()}`
+              : "inline datum data is null";
+          decode = { ok: false, reason };
         }
-      } catch (e) {
-        console.log(`  ❌ Error accessing datum: ${e.message}`);
-        proposalHash = `error_${utxo.input().transactionId().slice(0, 8)}`;
+      } catch (e: any) {
+        decode = {
+          ok: false,
+          reason: `error accessing datum: ${e?.message ?? String(e)}`,
+        };
       }
 
-      // Validate the deposit structure to check if it's withdrawable
-      console.log(`  🔍 Validating deposit structure...`);
-      const validation = await validateDepositStructure(
-        blaze,
-        utxo.input().transactionId(),
-        Number(utxo.input().index()),
-      );
-
-      if (!validation.isValid) {
-        console.log(`  ⚠️  Malformed deposit: ${validation.reason}`);
-
-        // Add to malformed submissions
-        malformedSubmissions.push({
-          txHash: utxo.input().transactionId(),
-          outputIndex: Number(utxo.input().index()),
-          adaAmount,
-          address: output.address().toBech32(),
-          reason: validation.reason || "Unknown validation failure",
-          rawDatum,
-        });
-
-        malformedAda += adaAmount;
-        continue; // Skip adding to valid submissions
+      if (!decode.ok) {
+        console.warn(
+          `[fetch-submissions] datum decode failed for tx ${txHash}; skipping (${decode.reason})`,
+        );
       }
 
-      console.log(`  ✅ Valid withdrawable deposit`);
-      validAda += adaAmount;
-
-      // Create submission info
-      const submissionInfo: ISubmissionInfo = {
-        txHash: utxo.input().transactionId(),
-        outputIndex: Number(utxo.input().index()),
+      classified.push({
+        txHash,
+        outputIndex,
         adaAmount,
         address: output.address().toBech32(),
-        proposalHash,
-        parsedDatum,
         rawDatum,
-        validationStatus: "valid",
-      };
-
-      // Group by proposal hash
-      if (!groupedSubmissions[proposalHash]) {
-        const proposal = parsedDatum?.proposal || {
-          deposit: adaAmount,
-          anchor: { url: "unknown", hash: "unknown" },
-          action: { kind: "Unknown" as any },
-        };
-
-        const status: "Active" | "Completed" | "Unknown" =
-          parsedDatum?.datumType === "After"
-            ? "Completed"
-            : parsedDatum?.datumType === "Before"
-              ? "Active"
-              : "Unknown";
-
-        groupedSubmissions[proposalHash] = {
-          proposalHash,
-          proposal,
-          submissions: [],
-          totalAda: 0n,
-          submissionCount: 0,
-          status,
-        };
-      }
-
-      groupedSubmissions[proposalHash].submissions.push(submissionInfo);
-      groupedSubmissions[proposalHash].totalAda += adaAmount;
-      groupedSubmissions[proposalHash].submissionCount++;
+        decode,
+        // Placeholder; the structural check runs in the batched pass below.
+        validation: { isValid: true },
+      });
     }
 
-    return {
-      validSubmissions: groupedSubmissions,
-      malformedSubmissions,
-      totalStats: {
-        totalUTxOs: scriptUtxos.length,
-        validUTxOs: Object.values(groupedSubmissions).reduce(
-          (sum, group) => sum + group.submissionCount,
-          0,
-        ),
-        malformedUTxOs: malformedSubmissions.length,
-        totalAda,
-        validAda,
-        malformedAda,
-      },
-    };
+    // Only the structural (unspent) check requires a provider call; skip it
+    // for UTxOs we already know we can't decode — they're malformed anyway.
+    // The checks are independent per UTxO, so run them concurrently instead
+    // of one sequential round-trip per loop iteration (~100 decodable UTxOs
+    // went from ~100×latency to ~1×latency wall-clock).
+    const decodable = classified.filter((item) => item.decode.ok);
+    if (decodable.length > 0) {
+      console.log(
+        `\nValidating deposit structure for ${decodable.length} decodable UTxO(s)...`,
+      );
+      await Promise.all(
+        decodable.map(async (item) => {
+          item.validation = await validateDepositStructure(
+            blaze,
+            item.txHash,
+            item.outputIndex,
+          );
+          console.log(
+            item.validation.isValid
+              ? `  ${item.txHash.slice(0, 16)}…#${item.outputIndex}: valid withdrawable deposit`
+              : `  ${item.txHash.slice(0, 16)}…#${item.outputIndex}: malformed deposit: ${item.validation.reason}`,
+          );
+        }),
+      );
+    }
+
+    return groupClassifiedSubmissions(classified);
   } catch (error) {
     console.error("Error fetching submissions:", error);
     throw error;
@@ -330,7 +415,7 @@ const main = async () => {
     const result = await fetchAllSubmissions(cardanoProvider);
 
     // Display results
-    console.log("\n" + "=".repeat(70));
+    console.log(`\n${"=".repeat(70)}`);
     console.log("SUBMISSION ANALYSIS");
     console.log("=".repeat(70));
 

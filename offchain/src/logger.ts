@@ -17,7 +17,6 @@ export const setLoggerEnabled = (on: boolean): void => {
   enabled = on;
 };
 
-/* eslint-disable no-console */
 export const logger = {
   debug: (...args: unknown[]): void => {
     if (enabled) console.log(...args);
@@ -32,4 +31,3 @@ export const logger = {
     console.error(...args);
   },
 };
-/* eslint-enable no-console */

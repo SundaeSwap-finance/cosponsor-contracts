@@ -6,7 +6,18 @@ export interface DepositInfo {
   depositOutputIndex: number
   depositAmount: string // Keep as string for JSON compatibility
   proposalUrl: string
+  /**
+   * blake2b-256 hash of the serialized CosponsoredProposalProcedure —
+   * equals the gADA token asset name. The canonical proposal identity.
+   */
   proposalHash: string
+  /**
+   * SHA-256 of the off-chain proposal-anchor metadata (CIP-100/108).
+   * Carried for display/audit purposes only — NOT a proposal identity.
+   * Pre-audit code stored this in `proposalHash` (AUDIT.md F19), which
+   * silently broke any caller doing per-proposal grouping.
+   */
+  anchorContentHash?: string
   isSpent: boolean
   spentStatus: 'available' | 'spent' | 'not_found'
 }

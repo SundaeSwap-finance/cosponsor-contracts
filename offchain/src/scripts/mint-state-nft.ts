@@ -152,7 +152,7 @@ const main = async () => {
     // Mint state NFT
     const txId = await mintStateNft(cardanoProvider);
 
-    console.log("\n" + "=".repeat(60));
+    console.log(`\n${"=".repeat(60)}`);
     console.log("SUCCESS!");
     console.log(`State NFT minted in transaction: ${txId}`);
     console.log("The protocol is now properly configured for withdrawals.");

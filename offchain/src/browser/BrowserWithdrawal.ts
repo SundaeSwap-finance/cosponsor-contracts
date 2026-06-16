@@ -1,4 +1,3 @@
-
 import { Core, makeValue, Blaze, Provider, Wallet } from "@blaze-cardano/sdk";
 import { serialize } from "@blaze-cardano/data";
 import { CosponsorTypes } from "@validators/GeneratedTypes/index.js";
@@ -9,6 +8,11 @@ import {
   selectUtxosForWithdrawal,
   fetchWithdrawalPlan,
 } from "./fetchUserDeposits.js";
+import { resolveCosponsorScriptReference } from "./scriptRefResolver.js";
+import {
+  getCosponsorScriptAddress,
+  getStateScriptAddress,
+} from "./scriptAddress.js";
 
 import { logger } from "../logger.js";
 /**
@@ -38,82 +42,31 @@ export const browserWithdraw = async ({
     );
   }
 
-  logger.debug(`🔄 Starting withdrawal of ${withdrawAmount / 1_000_000n} ADA`);
+  logger.debug(`Starting withdrawal of ${withdrawAmount / 1_000_000n} ADA`);
 
   let tx = blaze.newTransaction();
 
   const cosponsorHash = BROWSER_CONFIG.scripts.cosponsor.hash;
-  const scriptAddress = Core.Address.fromBech32(
-    BROWSER_CONFIG.scriptReferenceAddress,
-  );
-  const cosponsorUtxoRef = BROWSER_CONFIG.scriptReferenceUtxos.cosponsor;
 
-  // Resolve script reference (Kupo+Ogmios or Blockfrost fallback)
-  let cosponsorReference = await blaze.provider.resolveScriptRef(
-    Core.Hash28ByteBase16(cosponsorHash),
-    scriptAddress,
-  );
-
-  if (cosponsorReference) {
-    logger.debug("✅ Script reference resolved via provider");
-  } else {
-    logger.debug("⚠️ Using Blockfrost fallback for script reference...");
-
-    const scriptCbor = BROWSER_CONFIG.scripts.cosponsor.cbor;
-    if (!scriptCbor) {
-      throw new Error("Cannot resolve script reference - no CBOR in config");
-    }
-
-    const plutusScript = Core.PlutusV3Script.fromCbor(Core.HexBlob(scriptCbor));
-    const script = Core.Script.newPlutusV3Script(plutusScript);
-
-    const computedHash = script.hash();
-    if (computedHash !== cosponsorHash) {
-      throw new Error(
-        `Script hash mismatch: expected ${cosponsorHash}, got ${computedHash}`,
-      );
-    }
-
-    const txInput = new Core.TransactionInput(
-      Core.TransactionId(cosponsorUtxoRef.txHash),
-      BigInt(cosponsorUtxoRef.outputIndex),
-    );
-
-    const resolvedUtxos = await blaze.provider.resolveUnspentOutputs([txInput]);
-    if (resolvedUtxos.length === 0) {
-      throw new Error(
-        `Could not resolve reference UTxO: ${cosponsorUtxoRef.txHash}#${cosponsorUtxoRef.outputIndex}`,
-      );
-    }
-
-    const resolvedUtxo = resolvedUtxos[0];
-    const originalOutput = resolvedUtxo.output();
-    const outputWithScript = new Core.TransactionOutput(
-      originalOutput.address(),
-      originalOutput.amount(),
-    );
-    const datum = originalOutput.datum();
-    if (datum) outputWithScript.setDatum(datum);
-    outputWithScript.setScriptRef(script);
-    cosponsorReference = new Core.TransactionUnspentOutput(
-      resolvedUtxo.input(),
-      outputWithScript,
-    );
-
-    logger.debug("✅ Using pre-computed script CBOR");
-  }
+  // Resolve the script reference (Kupo+Ogmios, with Blockfrost CBOR fallback).
+  // Shared with browserDeposit — see scriptRefResolver.ts (audit H4). The
+  // shared resolver also verifies the provider-resolved script hash (AUDIT.md
+  // F26), which this withdrawal path previously skipped.
+  const cosponsorReference = await resolveCosponsorScriptReference(blaze, {
+    scriptHash: cosponsorHash,
+    scriptReferenceAddress: BROWSER_CONFIG.scriptReferenceAddress,
+    referenceUtxo: BROWSER_CONFIG.scriptReferenceUtxos.cosponsor,
+    fallbackCbor: BROWSER_CONFIG.scripts.cosponsor.cbor,
+  });
 
   tx = tx.addReferenceInput(cosponsorReference);
 
   // Add CosponsorState reference (required for validation)
   const stateHash = BROWSER_CONFIG.scripts.cosponsorState.hash;
   const stateNft = BROWSER_CONFIG.statePolicyId;
-  const stateScriptAddress = Core.addressFromCredential(
+  const stateScriptAddress = getStateScriptAddress(
     blaze.provider.network,
-    Core.Credential.fromCore({
-      hash: Core.Hash28ByteBase16(stateHash),
-      type: Core.CredentialType.ScriptHash,
-    }),
+    stateHash,
   );
 
   let stateReference = await blaze.provider.resolveScriptRef(
@@ -132,6 +85,9 @@ export const browserWithdraw = async ({
 
       for (const [assetId] of multiasset.entries()) {
         if (assetId === stateNftAssetId) {
+          // A UTxO carrying the state NFT but no datum is corrupt script state
+          // — skip it rather than attach a broken reference input (audit L3).
+          if (!utxo.output().datum()) continue;
           stateReference = utxo;
           break;
         }
@@ -147,7 +103,7 @@ export const browserWithdraw = async ({
   }
 
   tx = tx.addReferenceInput(stateReference);
-  logger.debug("✅ Added CosponsorState reference input");
+  logger.debug("Added CosponsorState reference input");
 
   // Select script UTxOs biggest-first to cover withdrawal amount
   const { selected: selectedUtxos, totalSelected } = selectUtxosForWithdrawal(
@@ -162,7 +118,7 @@ export const browserWithdraw = async ({
   }
 
   logger.debug(
-    `📦 Selected ${selectedUtxos.length} UTxO(s) with ${totalSelected / 1_000_000n} ADA`,
+    `Selected ${selectedUtxos.length} UTxO(s) with ${totalSelected / 1_000_000n} ADA`,
   );
 
   // Add each selected UTxO as input
@@ -174,7 +130,7 @@ export const browserWithdraw = async ({
   for (const scriptUtxo of selectedUtxos) {
     tx = tx.addInput(scriptUtxo.utxo, withdrawRedeemer);
     logger.debug(
-      `  ✅ Added UTxO: ${scriptUtxo.txHash.slice(0, 16)}...#${scriptUtxo.outputIndex} (${scriptUtxo.lockedAmount / 1_000_000n} ADA)`,
+      `  Added UTxO: ${scriptUtxo.txHash.slice(0, 16)}...#${scriptUtxo.outputIndex} (${scriptUtxo.lockedAmount / 1_000_000n} ADA)`,
     );
   }
 
@@ -188,7 +144,7 @@ export const browserWithdraw = async ({
   const tokensToBurn = new Map<string, bigint>(); // assetName -> amount to burn
 
   logger.debug(
-    `🔍 Looking for ${withdrawAmount / 1_000_000n} ADA worth of gADA tokens to burn...`,
+    `Looking for ${withdrawAmount / 1_000_000n} ADA worth of gADA tokens to burn...`,
   );
 
   for (const utxo of walletUtxos) {
@@ -213,7 +169,7 @@ export const browserWithdraw = async ({
         remainingToBurn -= burnAmount;
         utxoHasTokens = true;
         logger.debug(
-          `  📦 Found ${burnAmount / 1_000_000n} ADA worth of token ${assetName.slice(0, 16)}...`,
+          `  Found ${burnAmount / 1_000_000n} ADA worth of token ${assetName.slice(0, 16)}...`,
         );
       }
     }
@@ -246,7 +202,7 @@ export const browserWithdraw = async ({
   for (const [assetName, amount] of tokensToBurn) {
     burnAmounts.set(Core.AssetName(assetName), -amount); // Negative for burning
     logger.debug(
-      `🔥 Burning ${amount / 1_000_000n} gADA of token ${assetName.slice(0, 16)}...`,
+      `Burning ${amount / 1_000_000n} gADA of token ${assetName.slice(0, 16)}...`,
     );
   }
 
@@ -261,11 +217,9 @@ export const browserWithdraw = async ({
     paymentCredential &&
     paymentCredential.type === Core.CredentialType.KeyHash
   ) {
-    tx = tx.addRequiredSigner(
-      Core.Ed25519KeyHashHex(paymentCredential.hash),
-    );
+    tx = tx.addRequiredSigner(Core.Ed25519KeyHashHex(paymentCredential.hash));
     logger.debug(
-      `✍️ Added required signer: ${paymentCredential.hash.slice(0, 16)}...`,
+      `Added required signer: ${paymentCredential.hash.slice(0, 16)}...`,
     );
   } else {
     throw new Error("Cannot extract payment key hash from wallet address");
@@ -277,22 +231,32 @@ export const browserWithdraw = async ({
   const excessAda = totalSelected - withdrawAmount;
   if (excessAda > 0n) {
     logger.debug(
-      `💫 Returning ${excessAda / 1_000_000n} ADA back to script address`,
+      `Returning ${excessAda / 1_000_000n} ADA back to script address`,
     );
 
     // Calculate cosponsor script address
-    const cosponsorScriptAddress = Core.addressFromCredential(
+    const cosponsorScriptAddress = getCosponsorScriptAddress(
       blaze.provider.network,
-      Core.Credential.fromCore({
-        hash: Core.Hash28ByteBase16(cosponsorHash),
-        type: Core.CredentialType.ScriptHash,
-      }),
+      cosponsorHash,
     );
+
+    // Defensive invariant (audit C3): reaching here requires excessAda > 0,
+    // i.e. totalSelected > withdrawAmount > 0, which means the biggest-first
+    // selection pushed at least one UTxO. Guard explicitly so a future
+    // refactor of the threshold check above can't silently turn this into an
+    // `undefined[0]` runtime panic.
+    if (selectedUtxos.length === 0) {
+      throw new Error(
+        "BrowserWithdrawal: no script UTxOs selected for change output — invariant broken",
+      );
+    }
 
     // Get the datum from the first selected UTxO (they all have the same proposal key)
     const firstUtxoDatum = selectedUtxos[0].utxo.output().datum();
     if (!firstUtxoDatum) {
-      throw new Error("Selected UTxO has no datum - cannot create change output");
+      throw new Error(
+        "Selected UTxO has no datum - cannot create change output",
+      );
     }
 
     // Send excess back to script with original datum.
@@ -309,8 +273,8 @@ export const browserWithdraw = async ({
   tx = tx.payAssets(changeAddress, makeValue(withdrawAmount));
   tx = tx.setChangeAddress(changeAddress);
 
-  logger.debug(`💰 Withdrawing ${withdrawAmount / 1_000_000n} ADA to wallet`);
-  logger.debug("✅ Withdrawal transaction built successfully");
+  logger.debug(`Withdrawing ${withdrawAmount / 1_000_000n} ADA to wallet`);
+  logger.debug("Withdrawal transaction built successfully");
 
   return tx;
 };

@@ -1,6 +1,5 @@
 import dotenv from "dotenv";
 import { CardanoProvider } from "@utils/provider.js";
-import { Core } from "@blaze-cardano/sdk";
 import { makeValue } from "@blaze-cardano/sdk";
 import { PROPOSAL_LIFETIME, MIN_WALLET_BALANCE } from "@/Config.js";
 
@@ -69,7 +68,7 @@ const main = async () => {
     // Create configuration transaction
     const configTxId = await createConfigurationTransaction(cardanoProvider);
 
-    console.log("\n" + "=".repeat(60));
+    console.log(`\n${"=".repeat(60)}`);
     console.log("NEXT STEPS:");
     console.log("1. Update Config.ts with:");
     console.log(`   PROTOCOL_BOOT_TRANSACTION_ID = "${configTxId}"`);

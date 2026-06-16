@@ -1,23 +1,35 @@
-# @sundaeswap/cosponsor
+# @sundaeswap/cosponsor-sdk
 
-Cosponsor SDK for Cardano smart contract interactions - handles deposits and withdrawals for governance proposal cosponsoring.
+Cosponsor SDK for Cardano smart contract interactions — handles deposits and withdrawals for governance-proposal cosponsoring, in both Node and browser environments.
 
 ## Installation
 
 ```bash
-npm install @sundaeswap/cosponsor
+npm install @sundaeswap/cosponsor-sdk
 ```
 
-## Usage
+## Node vs Browser API parity
 
-The SDK supports both Blockfrost and Ogmios+Kupo backends with optional debug logging.
+The SDK ships two entry points with parallel functionality:
+
+| | Node (`@sundaeswap/cosponsor-sdk`) | Browser (`@sundaeswap/cosponsor-sdk/browser`) |
+| --- | --- | --- |
+| Deposit | `deposit({ blaze, cosponsoredProposal, depositAmount })` | `browserDeposit({ blaze, cosponsoredProposal, depositAmount })` |
+| Withdraw | `withdraw({ blaze, deposits })` | `browserWithdraw({ blaze, withdrawalPlan, withdrawAmount })` |
+| Provider | `CardanoProvider` (Blockfrost / Kupmios, reads env) | bring your own `Blaze` instance + injected wallet |
+
+- The **Node** path is provider-driven (`CardanoProvider` reads Blockfrost/Kupmios config from env) and `withdraw` takes an explicit list of deposits.
+- The **Browser** path works against a `Blaze` instance you construct from a wallet (e.g. via a dApp connector); `browserWithdraw` takes a `withdrawalPlan` (from `fetchWithdrawalPlan`) plus an amount.
+- Both produce a transaction you complete with the standard Blaze flow: `tx.complete()` → `blaze.signTransaction()` → `blaze.provider.postTransactionToChain()`.
+
+## Node usage
 
 ### Provider Configuration
 
 ```typescript
-import { CardanoProvider, deposit, withdraw } from "@sundaeswap/cosponsor";
+import { CardanoProvider, deposit, withdraw } from "@sundaeswap/cosponsor-sdk";
 
-// Option 1: Blockfrost Configuration
+// Option 1: Blockfrost
 const provider = new CardanoProvider({
   type: "blockfrost",
   blockfrostKey: "your-api-key",
@@ -31,15 +43,12 @@ const provider = new CardanoProvider({
   },
 });
 
-// Option 2: Ogmios + Kupo Configuration
+// Option 2: Ogmios + Kupo
 const provider = new CardanoProvider({
   type: "kupmios",
   ogmiosUrl: "ws://localhost:1337",
   kupoUrl: "http://localhost:1442",
-  debugMode: false, // silent mode
-  wallet: {
-    seedPhrase: "your seed phrase",
-  },
+  wallet: { seedPhrase: "your seed phrase" },
 });
 
 await provider.initialize();
@@ -52,21 +61,26 @@ const blaze = provider.getBlaze();
 const depositTx = await deposit({
   blaze,
   cosponsoredProposal: {
-    action: { kind: "treasury", withdrawals: [...] },
-    anchor: { url: "https://...", hash: "..." }
+    deposit: 100_000_000n,
+    anchor: { url: "https://example.com/proposal.json", hash: "<32-byte hex>" },
+    // `action` is a discriminated union by `kind`:
+    //   "NicePoll" | "TreasuryWithdrawal" | "ConstitutionalCommittee"
+    //   | "NewConstitution" | "ProtocolParameters" | "HardFork" | "NoConfidence"
+    action: { kind: "NicePoll" },
   },
   depositAmount: 100_000_000n, // 100 ADA
-  debugMode: true // optional logging
 });
 
-const signedTx = await depositTx.sign();
-const txId = await signedTx.submit();
+const completed = await depositTx.complete();
+const signed = await blaze.signTransaction(completed);
+const txId = await blaze.provider.postTransactionToChain(signed);
 ```
 
 ### Making Withdrawals
 
 ```typescript
-// Single or multiple deposit withdrawal
+// withdraw() handles single, same-proposal bulk, and multi-proposal bulk
+// withdrawals in one call (it groups the deposits internally).
 const withdrawalTx = await withdraw({
   blaze,
   deposits: [
@@ -75,72 +89,103 @@ const withdrawalTx = await withdraw({
       depositOutputIndex: 0,
       depositAmount: 100_000_000n,
       cosponsoredProposal: {
-        /* same proposal as used in deposit */
+        /* same proposal used in the matching deposit */
       },
     },
-    // Can add more deposits from same or different proposals
+    // ...more deposits, from the same or different proposals
   ],
-  debugMode: true, // optional logging
 });
 
-const signedTx = await withdrawalTx.sign();
-const txId = await signedTx.submit();
+const completed = await withdrawalTx.complete();
+const signed = await blaze.signTransaction(completed);
+const txId = await blaze.provider.postTransactionToChain(signed);
 ```
+
+## Browser usage
+
+```typescript
+import {
+  browserDeposit,
+  browserWithdraw,
+  fetchWithdrawalPlan,
+} from "@sundaeswap/cosponsor-sdk/browser";
+
+// `blaze` is a Blaze instance built from the connected wallet (e.g. via your
+// dApp wallet connector). BROWSER_CONFIG carries the pre-deployed script
+// hashes/CBOR so no runtime parameter application is needed.
+
+// Deposit
+const depositTx = await browserDeposit({
+  blaze,
+  cosponsoredProposal: {
+    deposit: 100_000_000n,
+    anchor: { url: "https://example.com/proposal.json", hash: "<32-byte hex>" },
+    action: { kind: "NicePoll" },
+  },
+  depositAmount: 100_000_000n,
+});
+const txId = await blaze.provider.postTransactionToChain(
+  await blaze.signTransaction(await depositTx.complete()),
+);
+
+// Withdraw
+const plan = await fetchWithdrawalPlan(blaze);
+const withdrawalTx = await browserWithdraw({
+  blaze,
+  withdrawalPlan: plan,
+  withdrawAmount: 100_000_000n,
+});
+```
+
+> **Reference scripts:** the browser path resolves the cosponsor reference script
+> via Kupo+Ogmios when available, falling back to the pre-computed CBOR in
+> `BROWSER_CONFIG`. If you use Blockfrost, import the `Blockfrost` class from this
+> SDK (`@sundaeswap/cosponsor-sdk/browser`) so any prototype patches apply to the
+> instance the SDK actually constructs.
+
+## Subpath exports
+
+```typescript
+import { logger, setLoggerEnabled } from "@sundaeswap/cosponsor-sdk/logger";
+import { PROTOCOL_BOOT_TRANSACTION_ID } from "@sundaeswap/cosponsor-sdk/Config";
+```
+
+## Logging
+
+The SDK's internal logger is silent by default. Enable it with either:
+
+- `setLoggerEnabled(true)` at runtime, or
+- the `COSPONSOR_SDK_DEBUG=1` environment variable.
+
+The Node `deposit`/`withdraw` functions also accept a per-call `debugMode?: boolean`.
 
 ## Development
 
-### Setup
-
 ```bash
 bun install
-```
-
-### Building
-
-```bash
 npm run build        # Build once
 npm run build:watch  # Build and watch for changes
 npm run clean        # Clean build artifacts
+npm test             # Run the test suite (bun test)
 ```
 
-### Local Development with cosponsor-ui
-
-For local development, you can copy the built SDK directly to the UI project:
+### Local development with cosponsor-ui
 
 ```bash
-npm run copy-to-ui
+npm run copy-to-ui   # builds the SDK and copies it into the UI project
 ```
 
-This will:
+### Dev scripts
 
-1. Build the SDK (`npm run build`)
-2. Copy the compiled files to `C:\Users\Mark\Documents\GitHub\cosponsor-ui\src\lib\cosponsor-sdk\`
+- `npm run configure` — Create the protocol boot transaction
+- `npm run deploy` — Deploy contracts
+- `npm run mint-state-nft` — Mint the state NFT
+- `npm run deposit` — Run the deposit script
 
-Then in the UI project, you can import directly:
-
-```typescript
-// In cosponsor-ui project
-import { CardanoProvider, deposit, withdraw } from "../lib/cosponsor-sdk";
-```
-
-### Debug Mode
-
-All console logging is controlled by the `debugMode` parameter:
-
-- `debugMode: false` (default): Silent operation
-- `debugMode: true`: Detailed logging of initialization, transaction building, and progress
-- Environment variable: `DEBUG_MODE=true` or `DEBUG_MODE=1`
-
-### Scripts
-
-- `npm run configure` - Configure environment
-- `npm run deploy` - Deploy contracts
-- `npm run deposit` - Run deposit script
-- `npm run withdrawal` - Run withdrawal script
+> Withdrawals are not a standalone script — call the SDK's `withdraw()` from your
+> own code (see Node usage above).
 
 ## API Reference
-
-### Types
 
 ```typescript
 // Provider configuration
@@ -175,6 +220,11 @@ interface IWithdrawalArgs<P, W> {
   debugMode?: boolean;
 }
 ```
+
+## Auditing
+
+Security and code-health findings are tracked in [`AUDIT.md`](./AUDIT.md), with the
+pre-publish review for this release in [`1.0.0-alpha.2.audit.md`](./1.0.0-alpha.2.audit.md).
 
 ## License
 
