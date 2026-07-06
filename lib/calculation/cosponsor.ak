@@ -7,7 +7,8 @@ use aiken/option
 use aiken/primitive/bytearray
 use calculation/conversion.{
   convert_extra_signatories, convert_fee, convert_inputs, convert_mint,
-  convert_outputs, convert_proposals,
+  convert_outputs, convert_proposals, convert_reference_inputs, convert_ttl,
+  convert_withdrawals, map_header,
 }
 use calculation/shared.{
   find_script_inputs, get_state_datum, proposal_procedure_hash,
@@ -15,8 +16,9 @@ use calculation/shared.{
 use cardano/address.{Script}
 use cardano/assets.{AssetName, PolicyId}
 use cardano/transaction.{InlineDatum, Output, Transaction, find_script_outputs}
-use types/cosponsor.{After,
-  Before, CosponsorDatum, CosponsoredProposalProcedure}
+use types/cosponsor.{
+  After, Before, CosponsorDatum, CosponsoredProposalProcedure,
+}
 
 pub fn present_in_withdrawal(
   transaction: Transaction,
@@ -49,9 +51,9 @@ pub fn propose(
   transaction: Transaction,
   own_policy_id: PolicyId,
   true_policy_id: PolicyId,
-  collateral_inputs: ByteArray,
-  collateral_output: ByteArray,
-  collateral_fee: ByteArray,
+  _collateral_inputs: ByteArray,
+  _collateral_output: ByteArray,
+  _collateral_fee: ByteArray,
 ) -> Bool {
   let cosponsor_inputs =
     find_script_inputs(transaction.inputs, own_policy_id)
@@ -60,6 +62,21 @@ pub fn propose(
   expect InlineDatum(input_data) = cosponsor_input.datum
   expect input_datum: CosponsorDatum = input_data
   expect Before { cosponsored } = input_datum
+
+  // Every pooled input must fund THIS proposal. Without this check,
+  // `cosponsor_ada_map`'s catch-all bucket would let pledges for proposal B
+  // be spent into proposal A's submission, stranding B's gADA holders.
+  let expected_proposal_hash = proposal_procedure_hash(cosponsored)
+  expect
+    cosponsor_inputs
+      |> list.all(
+          fn(output) {
+            expect InlineDatum(data) = output.datum
+            expect datum: CosponsorDatum = data
+            expect Before { cosponsored: input_cosponsored } = datum
+            proposal_procedure_hash(input_cosponsored) == expected_proposal_hash
+          },
+        )
 
   let input_ada_dict =
     cosponsor_inputs
@@ -85,27 +102,59 @@ pub fn propose(
     if input_ada > cosponsored.procedure.deposit {
       expect Some(output_ada) = dict.get(output_ada_dict, proposal_hash)
       expect dict.size(output_ada_dict) == 1
+      // Pin the leftover output to THIS proposal. `cosponsor_ada_map` keys
+      // every output to #"" here (empty expired-map), so the amount/size
+      // checks alone would accept a leftover carrying an `After` datum
+      // (prematurely redeemable) or a `Before` for a DIFFERENT proposal
+      // (routing this pool's surplus to another proposal's gADA holders).
+      // Require it to be `Before { cosponsored }` hashing to this proposal.
+      expect
+        cosponsor_outputs
+          |> list.all(
+              fn(output) {
+                expect InlineDatum(data) = output.datum
+                expect datum: CosponsorDatum = data
+                expect Before { cosponsored: output_cosponsored } = datum
+                proposal_procedure_hash(output_cosponsored) == expected_proposal_hash
+              },
+            )
       input_ada - cosponsored.procedure.deposit == output_ada
     } else {
       dict.size(output_ada_dict) == 0
     }
 
-  expect [Pair(script_data_hash, 1)] =
+  expect [Pair(_script_data_hash, 1)] =
     transaction.mint |> assets.tokens(true_policy_id) |> dict.to_pairs()
 
   and {
     leftover_ada_preserved?,
-    metadata_validation(
-      transaction,
-      [cosponsored],
-      script_data_hash,
-      collateral_inputs,
-      collateral_output,
-      collateral_fee,
-    )?,
+    // Bind the pledged governance action directly from the Plutus V3 script
+    // context (which exposes `proposal_procedures`) rather than reconstructing
+    // and hashing the entire tx body. The body-hash approach required
+    // byte-exact canonical CBOR — including canonically-sorted input sets —
+    // that cardano-sdk/Blaze does not emit deterministically, so it could
+    // never reliably validate. NOTE: the context's `ProposalProcedure` drops
+    // the anchor, so the anchor is committed by the gADA token at deposit but
+    // not re-verified here. Mainnet gate: decide whether anchor binding is
+    // required and, if so, restore a targeted anchor check.
+    list.has(transaction.proposal_procedures, cosponsored.procedure)?,
   }
 }
 
+// Reconstructs the transaction body CBOR byte-for-byte as
+// @blaze-cardano/core serializes it (Conway era) and asserts it hashes to
+// the real transaction id. This is what cryptographically ties the pooled
+// funds to a transaction that genuinely submits the pledged governance
+// action — no other body layout can produce the same id.
+//
+// Canonical field set (ascending keys):
+//   00 inputs · 01 outputs · 02 fee · 03 ttl · 05 withdrawals · 09 mint ·
+//   0b script_data_hash · 0d collateral inputs · [0e required signers] ·
+//   10 collateral return · 11 total collateral · [12 reference inputs] ·
+//   14 proposal_procedures
+// 0e/12 are included only when non-empty (the ledger omits empty fields).
+// Collateral fields (0d/10/11) are invisible to the script context, so the
+// WPropose redeemer supplies their raw bytes.
 fn metadata_validation(
   transaction: Transaction,
   proposals: List<CosponsoredProposalProcedure>,
@@ -114,38 +163,66 @@ fn metadata_validation(
   collateral_output: ByteArray,
   collateral_fee: ByteArray,
 ) -> Bool {
-  let inputs_cbor =
-    convert_inputs(transaction.inputs) |> bytearray.concat(#"00", _)
-  let outputs_cbor =
-    convert_outputs(transaction.outputs) |> bytearray.concat(#"01", _)
-  let fee_cbor = convert_fee(transaction.fee) |> bytearray.concat(#"02", _)
-  let mint_cbor = convert_mint(transaction.mint) |> bytearray.concat(#"09", _)
+  let has_signers = !list.is_empty(transaction.extra_signatories)
+  let has_reference_inputs = !list.is_empty(transaction.reference_inputs)
 
-  let script_data_hash_cbor =
-    serialise(script_data_hash) |> bytearray.concat(#"0b", _)
+  let field_count =
+    11 + if has_signers {
+      1
+    } else {
+      0
+    } + if has_reference_inputs {
+      1
+    } else {
+      0
+    }
 
   let extra_signatories_cbor =
-    convert_extra_signatories(transaction.extra_signatories)
-      |> bytearray.concat(#"0e", _)
+    if has_signers {
+      #"0e"
+        |> bytearray.concat(
+            convert_extra_signatories(transaction.extra_signatories),
+          )
+    } else {
+      ""
+    }
 
-  let collateral_inputs_cbor = bytearray.concat(#"0d", collateral_inputs)
+  let reference_inputs_cbor =
+    if has_reference_inputs {
+      #"12"
+        |> bytearray.concat(
+            convert_reference_inputs(transaction.reference_inputs),
+          )
+    } else {
+      ""
+    }
 
-  let collateral_output_cbor = bytearray.concat(#"10", collateral_output)
-  let collateral_fee_cbor = bytearray.concat(#"11", collateral_fee)
-
-  let proposals_cbor = bytearray.concat(#"14", convert_proposals(proposals))
   let tx_cbor =
-    #"a9"
-      |> bytearray.concat(inputs_cbor)
-      |> bytearray.concat(outputs_cbor)
-      |> bytearray.concat(fee_cbor)
-      |> bytearray.concat(mint_cbor)
-      |> bytearray.concat(script_data_hash_cbor)
-      |> bytearray.concat(collateral_inputs_cbor)
+    map_header(field_count)
+      |> bytearray.concat(#"00")
+      |> bytearray.concat(convert_inputs(transaction.inputs))
+      |> bytearray.concat(#"01")
+      |> bytearray.concat(convert_outputs(transaction.outputs))
+      |> bytearray.concat(#"02")
+      |> bytearray.concat(convert_fee(transaction.fee))
+      |> bytearray.concat(#"03")
+      |> bytearray.concat(convert_ttl(transaction.validity_range))
+      |> bytearray.concat(#"05")
+      |> bytearray.concat(convert_withdrawals(transaction.withdrawals))
+      |> bytearray.concat(#"09")
+      |> bytearray.concat(convert_mint(transaction.mint))
+      |> bytearray.concat(#"0b")
+      |> bytearray.concat(serialise(script_data_hash))
+      |> bytearray.concat(#"0d")
+      |> bytearray.concat(collateral_inputs)
       |> bytearray.concat(extra_signatories_cbor)
-      |> bytearray.concat(collateral_output_cbor)
-      |> bytearray.concat(collateral_fee_cbor)
-      |> bytearray.concat(proposals_cbor)
+      |> bytearray.concat(#"10")
+      |> bytearray.concat(collateral_output)
+      |> bytearray.concat(#"11")
+      |> bytearray.concat(collateral_fee)
+      |> bytearray.concat(reference_inputs_cbor)
+      |> bytearray.concat(#"14")
+      |> bytearray.concat(convert_proposals(proposals))
 
   transaction.id == crypto.blake2b_256(tx_cbor)
 }
