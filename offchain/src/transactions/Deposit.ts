@@ -148,7 +148,9 @@ export const deposit = async <P extends Provider, W extends Wallet>({
     );
     tokenMetadataMap.insert(
       Core.Metadatum.newText("proposal_url"),
-      Core.Metadatum.newText(proposalUrlDecoded),
+      // Chunk: anchor URLs commonly exceed the 64-byte CIP-25 string limit
+      // (e.g. the served /proposals/<slug>.jsonld paths).
+      chunkCip25Text(proposalUrlDecoded),
     );
     tokenMetadataMap.insert(
       Core.Metadatum.newText("governance_action"),

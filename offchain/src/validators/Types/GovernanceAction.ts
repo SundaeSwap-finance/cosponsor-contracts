@@ -28,10 +28,30 @@ export interface IRational {
   denominator: bigint;
 }
 
+/**
+ * A single protocol-parameter update value. Covers every Conway param shape
+ * currently supported end-to-end: plain integers (`I n` in the script
+ * context) and unit/nonnegative intervals (`List [I num, I den]`). Nested
+ * shapes (cost models, ex-unit prices, voting-threshold lists) are not yet
+ * representable — extend here AND in `paramValueToPlutusData` /
+ * `encodeGovernanceAction` together.
+ */
+export type TProtocolParamValue = bigint | IRational;
+
 // Constructor 0: Protocol Parameters Update
 export interface IProtocolParameters extends IGovernanceAction {
   kind: "ProtocolParameters";
   ancestor: IGovernanceActionId | null;
+  /**
+   * Sparse Conway `protocol_param_update` entries: `[paramId, newValue]`.
+   * The ledger presents the update to scripts SORTED ascending by param id
+   * (the guardrails validator relies on that), so entries are sorted at
+   * encode time regardless of input order. An empty/absent update is
+   * representable in the datum but NOT submittable (`MalformedProposal`).
+   */
+  newParameters?: Array<[bigint, TProtocolParamValue]>;
+  /** Constitution guardrails script hash (Option<ScriptHash> on-chain). */
+  guardRails?: string;
 }
 
 // Constructor 1: Hard Fork Initiation
@@ -84,12 +104,28 @@ export interface INewConstitution extends IGovernanceAction {
    */
   guardrails?: string;
   /**
-   * @deprecated The on-chain `Constitution` type carries no document anchor —
-   * only `guardrails`. This field has no on-chain slot, was silently ignored
-   * by the builder, and will be removed. Use {@link guardrails}. (audit H2)
+   * The constitution DOCUMENT anchor the ledger-level action requires
+   * (`constitution = [anchor, script_hash / null]` in the Conway CDDL).
+   * `url` is PLAIN TEXT (not hex — unlike the procedure anchor), `hash` the
+   * 32-byte blake2b-256 of the document, hex.
+   *
+   * Consumed ONLY by the field-20 encoder at propose time. It has NO datum
+   * slot — the V3 script context drops the constitution anchor, so the
+   * on-chain structural comparison neither sees nor commits it. TRUST GAP:
+   * the pledged gADA does not bind the constitution document; by convention
+   * the proposal's CIP-108 metadata (which the gADA DOES commit via the
+   * procedure anchor) must declare the same url+hash so anyone can verify
+   * the submission off-chain. Cryptographic commitment is a datum extension
+   * slated for the per-campaign redesign redeploy (mainnet-gate decision).
+   */
+  constitutionAnchor?: { url: string; hash: string };
+  /**
+   * @deprecated Superseded by {@link constitutionAnchor} (as an SDK-side,
+   * encoder-only input — there is still no on-chain/datum slot). Ignored by
+   * every builder. (audit H2)
    */
   constitutionHash?: string;
-  /** @deprecated No on-chain slot. See {@link constitutionHash}. (audit H2) */
+  /** @deprecated No on-chain slot. See {@link constitutionAnchor}. (audit H2) */
   constitutionUrl?: string;
 }
 
@@ -185,6 +221,64 @@ const ancestorToContract = (
 };
 
 /**
+ * Sort + validate sparse param-update entries: ascending by param id (the
+ * order the ledger presents to scripts), duplicates rejected.
+ */
+export const sortedParamEntries = (
+  entries: Array<[bigint, TProtocolParamValue]> | undefined,
+): Array<[bigint, TProtocolParamValue]> => {
+  const sorted = [...(entries ?? [])].sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i][0] === sorted[i - 1][0]) {
+      throw new Error(
+        `sortedParamEntries: duplicate param id ${sorted[i][0]}`,
+      );
+    }
+  }
+  return sorted;
+};
+
+/**
+ * Encode one param value exactly as the ledger's ToPlutusData does for the
+ * script context (cardano-ledger `Cardano.Ledger.Plutus.ToPlutusData`):
+ * integers → I n; unit/nonnegative intervals → List [I num, I den]
+ * (reduced rational, positive denominator — caller's responsibility).
+ */
+export const paramValueToPlutusData = (
+  value: TProtocolParamValue,
+): PlutusData => {
+  if (typeof value === "bigint") {
+    return PlutusData.newInteger(value);
+  }
+  const list = new PlutusList();
+  list.add(PlutusData.newInteger(value.numerator));
+  list.add(PlutusData.newInteger(value.denominator));
+  return PlutusData.newList(list);
+};
+
+/** Inverse of {@link paramValueToPlutusData} (parse round-trip). */
+export const paramValueFromPlutusData = (
+  data: PlutusData,
+): TProtocolParamValue => {
+  const integer = data.asInteger();
+  if (integer !== undefined) return integer;
+  const list = data.asList();
+  if (list && list.getLength() === 2) {
+    const numerator = list.get(0).asInteger();
+    const denominator = list.get(1).asInteger();
+    if (numerator !== undefined && denominator !== undefined) {
+      return { numerator, denominator };
+    }
+  }
+  throw new Error(
+    "paramValueFromPlutusData: unsupported param value shape (only " +
+      "integer and rational-interval params are supported)",
+  );
+};
+
+/**
  * Convert UI governance action to on-chain contract format
  *
  * Constructor indices (must match Aiken on-chain code):
@@ -203,15 +297,20 @@ export const ToContractType = (
     case "ProtocolParameters": {
       // Constructor 0: ParameterChange
       // `newParameters` is the opaque `ProtocolParametersUpdate` which
-      // encodes as a bare CBOR Map (Pairs<Int, Data>). An empty object
-      // here means "no parameter changes" — matches the manual builder's
-      // empty `PlutusMap`.
+      // encodes as a bare CBOR Map (Pairs<Int, Data>). The record's
+      // integer-like keys iterate in ascending numeric order (JS spec),
+      // matching the sorted map the ledger shows the script context.
+      // Values are pre-built PlutusData (TPlutusData passthrough).
       const pp = ga as IProtocolParameters;
+      const newParameters: Record<number, PlutusData> = {};
+      for (const [id, value] of sortedParamEntries(pp.newParameters)) {
+        newParameters[Number(id)] = paramValueToPlutusData(value);
+      }
       return {
         ProtocolParameters: {
           ancestor: ancestorToContract(pp.ancestor),
-          newParameters: {},
-          guardrails: undefined, // No guardrails
+          newParameters,
+          guardrails: pp.guardRails, // undefined for Option::None
         },
       };
     }
@@ -336,9 +435,20 @@ export const fromContractType = (
     throw new Error(`fromContractType: unexpected string variant "${parsed}"`);
   }
   if ("ProtocolParameters" in parsed) {
+    // Round-trip newParameters + guardrails so the rebuild is hash-lossless
+    // (same asymmetric-round-trip bug class as TreasuryWithdrawal guardrails).
+    const pp = parsed.ProtocolParameters;
+    const entries: Array<[bigint, TProtocolParamValue]> = Object.entries(
+      pp.newParameters ?? {},
+    ).map(([id, value]) => [
+      BigInt(id),
+      paramValueFromPlutusData(value as PlutusData),
+    ]);
     return {
       kind: "ProtocolParameters",
-      ancestor: contractAncestorToUi(parsed.ProtocolParameters.ancestor),
+      ancestor: contractAncestorToUi(pp.ancestor),
+      newParameters: entries.length > 0 ? sortedParamEntries(entries) : undefined,
+      guardRails: pp.guardrails,
     };
   }
   if ("HardFork" in parsed) {
@@ -831,20 +941,38 @@ export const buildProtocolParametersAsPlutusData = (
 
   // Build ProtocolParametersUpdate
   // Opaque types encode directly as their inner type (no Constructor wrapper)
-  // inner: Pairs<Int, Data> = CBOR Map
-  // For no parameter changes, use an empty map
-  const updateData = PlutusData.newMap(new PlutusMap());
+  // inner: Pairs<Int, Data> = CBOR Map, ascending by param id (the order the
+  // ledger presents to the script context; guardrails relies on it).
+  const updateMap = new PlutusMap();
+  for (const [id, value] of sortedParamEntries(pp.newParameters)) {
+    updateMap.insert(
+      PlutusData.newInteger(id),
+      paramValueToPlutusData(value),
+    );
+  }
+  const updateData = PlutusData.newMap(updateMap);
 
-  // Build guardrails as Option::None (Constructor 1, no fields)
-  const guardrailsNone = PlutusData.newConstrPlutusData(
-    new ConstrPlutusData(1n, new PlutusList()),
-  );
+  // Build guardrails as Option<ScriptHash> (Some = ctor 0 [bytes], None =
+  // ctor 1 — byte-identical to the previous hardcoded None for no-guardrails
+  // proposals, so existing tokens stay hash-stable).
+  let guardrailsData: PlutusData;
+  if (pp.guardRails) {
+    const someFields = new PlutusList();
+    someFields.add(PlutusData.newBytes(Buffer.from(pp.guardRails, "hex")));
+    guardrailsData = PlutusData.newConstrPlutusData(
+      new ConstrPlutusData(0n, someFields),
+    );
+  } else {
+    guardrailsData = PlutusData.newConstrPlutusData(
+      new ConstrPlutusData(1n, new PlutusList()),
+    );
+  }
 
   // Build ProtocolParameters (Constructor 0)
   const fields = new PlutusList();
   fields.add(ancestorData);
   fields.add(updateData);
-  fields.add(guardrailsNone);
+  fields.add(guardrailsData);
 
   const result = PlutusData.newConstrPlutusData(
     new ConstrPlutusData(0n, fields),

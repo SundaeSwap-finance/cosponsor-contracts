@@ -1,6 +1,6 @@
 {
   "name": "@sundaeswap/cosponsor-sdk",
-  "version": "0.0.2",
+  "version": "0.0.7",
   "description": "Cosponsor SDK for Cardano smart contract interactions",
   "main": "dist/index.mjs",
   "module": "dist/index.mjs",
@@ -85,8 +85,11 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"*.js\" \"*.json\" \"*.md\"",
     "copy-to-ui": "bun run build && bun run dev/copy-to-ui.mjs",
     "configure": "bun run src/scripts/configure.ts",
+    "redeploy": "bun run src/scripts/redeploy.ts",
+    "register-reward-account": "bun run src/scripts/register-reward-account.ts",
     "deploy": "bun run src/scripts/deploy.ts",
     "deposit": "bun run src/scripts/deposit.ts",
+    "propose-dry-run": "bun run src/scripts/propose-dry-run.ts",
     "mint-state-nft": "bun run src/scripts/mint-state-nft.ts",
     "generate-script-cbor": "bun run src/scripts/generate-script-cbor.ts",
     "inspect-deposit": "bun run src/helpers/inspect-deposit.ts",
@@ -115,6 +118,7 @@
     }
   },
   "dependencies": {
+    "@aiken-lang/merkle-patricia-forestry": "^1.3.1",
     "@blaze-cardano/core": "^0.7.0",
     "@blaze-cardano/data": "^0.6.4",
     "@blaze-cardano/ogmios": "^0.0.7",

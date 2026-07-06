@@ -14,10 +14,11 @@ export type { BrowserConfig } from "./BrowserConfig.js";
 import { verifyCosponsorScriptCbor } from "./BrowserConfig.js";
 verifyCosponsorScriptCbor();
 
-// Browser deposit/withdrawal functions
+// Browser deposit/withdrawal/propose functions
 export { browserDeposit } from "./BrowserDeposit.js";
 export { browserWithdraw, browserWithdrawLegacy } from "./BrowserWithdrawal.js";
 export type { IWithdrawalPlan, IScriptUtxo } from "./BrowserWithdrawal.js";
+export { browserPropose } from "./BrowserPropose.js";
 
 // Wallet data fetching utilities
 export {

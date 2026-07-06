@@ -18,6 +18,14 @@ interface ScriptDeployment {
 export const deployContracts = async (
   cardanoProvider: CardanoProvider,
   deployToAddress?: string,
+  // Optional bootstrap overrides. Default to the Config baked-in values so
+  // running `bun run deploy` standalone is unchanged. The redeploy orchestrator
+  // passes a freshly-created boot UTxO explicitly so the deployed scripts are
+  // parameterized on the NEW boot id rather than Config's module-level default
+  // (which is frozen at import time and cannot be swapped afterwards).
+  bootId: string = PROTOCOL_BOOT_TRANSACTION_ID,
+  bootIndex: bigint = PROTOCOL_BOOT_TRANSACTION_INDEX,
+  lifetime: bigint = PROPOSAL_LIFETIME,
 ): Promise<Map<string, Core.TransactionId>> => {
   console.log("=== Deploying Parameterized Scripts ===");
 
@@ -32,14 +40,11 @@ export const deployContracts = async (
     : changeAddress;
 
   console.log(`Deploying to: ${deploymentAddress.toBech32()}`);
+  console.log(`Boot UTxO: ${bootId}:${bootIndex}`);
   console.log("");
 
   // Create the parameterized scripts that transactions actually need
-  const cosponsorState = new CosponsorState(
-    PROTOCOL_BOOT_TRANSACTION_ID,
-    PROTOCOL_BOOT_TRANSACTION_INDEX,
-    PROPOSAL_LIFETIME,
-  );
+  const cosponsorState = new CosponsorState(bootId, bootIndex, lifetime);
 
   const cosponsor = Cosponsor.new({
     statePolicyId: cosponsorState.script().hash(),

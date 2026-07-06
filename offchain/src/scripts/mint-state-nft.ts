@@ -19,6 +19,13 @@ dotenv.config();
 
 export const mintStateNft = async (
   cardanoProvider: CardanoProvider,
+  // Optional bootstrap overrides — default to Config so standalone
+  // `bun run mint-state-nft` is unchanged. The redeploy orchestrator passes the
+  // freshly-created boot UTxO so the state NFT is minted against the NEW boot id
+  // (a fresh state NFT requires a fresh, unspent boot UTxO).
+  bootId: string = PROTOCOL_BOOT_TRANSACTION_ID,
+  bootIndex: bigint = PROTOCOL_BOOT_TRANSACTION_INDEX,
+  lifetime: bigint = PROPOSAL_LIFETIME,
 ): Promise<string> => {
   console.log("=== Minting State NFT ===");
 
@@ -26,34 +33,26 @@ export const mintStateNft = async (
   const tx = blaze.newTransaction();
 
   // Create the CosponsorState instance
-  const cosponsorState = new CosponsorState(
-    PROTOCOL_BOOT_TRANSACTION_ID,
-    PROTOCOL_BOOT_TRANSACTION_INDEX,
-    PROPOSAL_LIFETIME,
-  );
+  const cosponsorState = new CosponsorState(bootId, bootIndex, lifetime);
 
   const statePolicy = cosponsorState.script().hash();
   const stateNftName = Buffer.from("cosponsor_state_nft").toString("hex");
 
   console.log(`State Policy ID: ${statePolicy}`);
   console.log(`State NFT Name: ${stateNftName}`);
-  console.log(
-    `Protocol Boot UTxO: ${PROTOCOL_BOOT_TRANSACTION_ID}:${PROTOCOL_BOOT_TRANSACTION_INDEX}`,
-  );
+  console.log(`Protocol Boot UTxO: ${bootId}:${bootIndex}`);
 
   // Find and spend the protocol boot UTxO
   const bootUtxoRef = new Core.TransactionInput(
-    Core.TransactionId(PROTOCOL_BOOT_TRANSACTION_ID),
-    BigInt(PROTOCOL_BOOT_TRANSACTION_INDEX),
+    Core.TransactionId(bootId),
+    BigInt(bootIndex),
   );
 
   const bootUtxoResult = await blaze.provider.resolveUnspentOutputs([
     bootUtxoRef,
   ]);
   if (bootUtxoResult.length === 0) {
-    throw new Error(
-      `Protocol boot UTxO not found: ${PROTOCOL_BOOT_TRANSACTION_ID}:${PROTOCOL_BOOT_TRANSACTION_INDEX}`,
-    );
+    throw new Error(`Protocol boot UTxO not found: ${bootId}:${bootIndex}`);
   }
 
   const bootUtxo = bootUtxoResult[0];

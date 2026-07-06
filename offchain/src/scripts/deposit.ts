@@ -4,6 +4,7 @@ import { deposit } from "@transactions/index";
 import { ICosponsoredProposal } from "@validators/index";
 import { TGovernanceAction } from "@validators/Types/GovernanceAction";
 import { MIN_PROVIDER_BALANCE } from "@/Config";
+import { selectTestProposal } from "./test-proposals";
 
 dotenv.config();
 
@@ -83,12 +84,16 @@ const main = async () => {
     cardanoProvider = await CardanoProvider.fromEnv();
     console.log("CardanoProvider initialized successfully");
 
-    if (!DEPOSIT_AMOUNT) {
-      throw new Error("DEPOSIT_AMOUNT environment variable is required");
-    }
-    const depositAmount = BigInt(DEPOSIT_AMOUNT);
+    // TEST_PROPOSAL=<name> pools toward a named fixture (e.g. TEST_WITHDRAWAL_1)
+    // shared with propose-dry-run.ts, using its own `deposit` as the amount so
+    // the pooled Before UTxO hashes to the same gADA token the propose expects.
+    const testProposal = selectTestProposal();
+    const depositAmount = testProposal ? testProposal.deposit : BigInt(DEPOSIT_AMOUNT);
 
     console.log(`Deposit amount: ${depositAmount} lovelace`);
+    if (testProposal) {
+      console.log(`Using TEST_PROPOSAL: ${process.env.TEST_PROPOSAL}`);
+    }
 
     // Check balance
     const balance = await cardanoProvider.getWalletBalance();
@@ -99,7 +104,7 @@ const main = async () => {
     }
 
     // Submit deposit transaction
-    await submitDepositTransaction(cardanoProvider, depositAmount);
+    await submitDepositTransaction(cardanoProvider, depositAmount, testProposal);
   } catch (error) {
     console.error("Deposit script failed:", error);
     process.exit(1);
