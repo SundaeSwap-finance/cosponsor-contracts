@@ -40,13 +40,12 @@ import { IGovernanceActionId } from "@validators/Types/GovernanceAction";
 export const GOV_ACTION_DEPOSIT = 1_000_000_000n; // 1000 tADA
 
 /**
- * Preview constitution guardrails (a.k.a. "guardrails script") hash, surfaced
- * by the ledger's `InvalidGuardrailsScriptHash` rejection. TreasuryWithdrawal
- * and ProtocolParameters actions MUST reference + witness this script.
- * DECISION D1: the propose builder does not yet attach this script witness.
+ * Constitution guardrails script hash — canonical definition now lives in
+ * `utils/guardrails.ts` (D1 resolved: the builder witnesses it via reference
+ * input). Re-exported here for the fixtures below.
  */
-export const GUARDRAILS_SCRIPT_HASH =
-  "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64";
+import { GUARDRAILS_SCRIPT_HASH } from "@/utils/guardrails.js";
+export { GUARDRAILS_SCRIPT_HASH };
 
 // ── PLACEHOLDERS (fill from PROPOSAL-SUBMISSION-DECISIONS.md before submit) ──
 

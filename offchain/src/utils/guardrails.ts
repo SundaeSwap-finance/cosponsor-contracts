@@ -26,6 +26,16 @@
 
 import { computeScriptData, Core, type Provider } from "@blaze-cardano/sdk";
 
+/**
+ * The interim-constitution guardrails script hash — identical on
+ * preview/preprod/mainnet (baked into the Conway genesis). NOTE: the
+ * authoritative value is the ENACTED constitution's script hash and changes
+ * if a NewConstitution with different guardrails ever ratifies; treat this
+ * constant as the current-era default, not an invariant.
+ */
+export const GUARDRAILS_SCRIPT_HASH =
+  "fa24fb305126805cf2164c161d852a0e7330cf988f1fe558cf7d4a64";
+
 /** Long-lived preview reference-script UTxO carrying the guardrails script. */
 export const PREVIEW_GUARDRAILS_REFERENCE_UTXO = {
   txHash: "f3f61635034140e6cec495a1c69ce85b22690e65ab9553ef408d524f58183649",
