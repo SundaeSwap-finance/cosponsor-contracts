@@ -221,6 +221,53 @@ interface IWithdrawalArgs<P, W> {
 }
 ```
 
+## Known limitations (audited 2026-07-07, v0.0.7)
+
+Every open shortcut in the SDK, by mainnet relevance. Each has an in-code comment at the named
+location; none blocks a preview release.
+
+1. **`resolveAncestor` queries Koios and defaults to the PREVIEW base URL** (`utils/ancestors.ts`).
+   A mainnet caller who omits `koiosBaseUrl` reads preview governance state — wire it to the
+   provider network before mainnet. _Why Koios at all:_ the ancestor is the last **enacted** action
+   per purpose, which is historical governance state. Ogmios v6 ledger-state queries only expose
+   proposals still **in flight** (enacted ones leave the set) and there is no `prevGovActionIds`
+   query (that is a node-to-client `cardano-cli query gov-state` capability our providers don't
+   have). Blockfrost CAN answer it, but its `/governance/proposals` list carries no enactment
+   status — you must page every proposal and hit the per-proposal detail endpoint (N+1 rate-limited
+   calls) to find the newest enacted one. Koios' `/proposal_list` returns all proposals **with**
+   `enacted_epoch` in one keyless filtered query. `IResolveAncestorOptions.fetchFn`/`koiosBaseUrl`
+   keep the source injectable if this ever needs to move to Blockfrost.
+2. **MPF state reconstruction is Blockfrost-only by default** (`utils/mpfReconstruct.ts`,
+   `Propose.ts::defaultStateChainQueries`): `NetworkId` cannot distinguish preview from preprod, so
+   testnet defaults to preview (`BLOCKFROST_NETWORK` overrides). Browser/Kupmios callers must pass
+   `stateChainQueries` explicitly.
+3. **No mainnet guardrails reference UTxO is baked in** (`utils/guardrails.ts`): mainnet
+   TreasuryWithdrawal/ParameterChange proposes fail closed until `GUARDRAILS_REF_UTXO=txHash#index`
+   is set. Deliberate — the preview UTxO (`f3f61635…#0`) is verified; a mainnet one must be too.
+4. **Each SDK release is bound to ONE deployment** (`Config.ts`, `browser/BrowserConfig.ts`):
+   boot transaction, script hashes and reference UTxOs for preview Deployment #2 are baked in.
+   Mainnet requires regenerating these via the configure/redeploy scripts and cutting a release.
+5. **Propose redeemers carry padded stub exUnits** (`Propose.ts`, `STUB_TOTAL_*`,
+   `GUARDRAILS_EX_UNITS`): they are never corrected with a real evaluation (that would change the
+   script_data_hash and tx id), so every propose slightly overpays fees. By design.
+6. **ProtocolParameters updates support only integer and rational values**
+   (`Types/GovernanceAction.ts::TProtocolParamValue`): cost models, ex-unit prices and
+   voting-threshold vectors are not representable and throw with a clear message.
+7. **NewConstitution's `constitutionAnchor` is not committed by the datum/gADA**
+   (`Types/GovernanceAction.ts::INewConstitution`): the V3 script context drops the constitution
+   anchor, so the proposer chooses the submitted document. Mitigated by convention (the CIP-108
+   metadata's `references` declare it); cryptographic commitment is deferred to the per-campaign
+   redesign.
+8. **The WPropose redeemer still carries three unused collateral ByteArrays**
+   (`Propose.ts::buildPass`): dead weight since the on-chain redesign, kept so the redeemer shape
+   is stable; prune together with the next type-breaking redeploy.
+9. **`scripts/soak-deposits.ts` has pre-existing `tsc` errors** (Ogmios `shutdown` typing):
+   script-only, not part of the built package.
+10. **Redeem / withdraw / reclaim paths do not exist in the SDK.** The on-chain redeem design is
+    the subject of a pending redesign (`AUDIT-PROPOSE-PATH.md` Finding B,
+    `DESIGN-per-campaign-instantiation.md`); ~9150 tADA of preview deposits wait on it
+    (`PREVIEW-DEPOSITS-TO-RECLAIM.md`). Mainnet blocker.
+
 ## License
 
 MIT
