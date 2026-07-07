@@ -39,6 +39,7 @@ import {
   actionNeedsGuardrails,
   resolveGuardrailsReference,
 } from "@/utils/guardrails.js";
+import type { IStateChainQueries } from "@/utils/mpfReconstruct.js";
 import { BROWSER_CONFIG } from "./BrowserConfig.js";
 import { resolveCosponsorScriptReference } from "./scriptRefResolver.js";
 import { logger } from "../logger.js";
@@ -48,11 +49,22 @@ export const browserPropose = async ({
   cosponsoredProposal,
   debugMode = false,
   validUntilUnixMs,
+  stateChainQueries,
 }: {
   blaze: Blaze<Provider, Wallet>;
   cosponsoredProposal: ICosponsoredProposal;
   debugMode?: boolean;
   validUntilUnixMs?: number;
+  /**
+   * REQUIRED in practice once the deployment's state MPF trie is non-empty
+   * (i.e. after the first successful propose): browsers have no
+   * `process.env.BLOCKFROST_API_KEY` for the node fallback, so the trie
+   * reconstruction needs injected chain queries — build them with
+   * `blockfrostStateChainQueries(projectId, network)` from
+   * `@sundaeswap/cosponsor-sdk/utils`. Only optional for the very first
+   * propose on a fresh deployment.
+   */
+  stateChainQueries?: IStateChainQueries;
 }): Promise<Core.Transaction> => {
   logger.debug("=== browserPropose START ===");
 
@@ -145,7 +157,13 @@ export const browserPropose = async ({
   };
 
   return proposeWithScriptContext(
-    { blaze, cosponsoredProposal, debugMode, validUntilUnixMs },
+    {
+      blaze,
+      cosponsoredProposal,
+      debugMode,
+      validUntilUnixMs,
+      stateChainQueries,
+    },
     context,
   );
 };
