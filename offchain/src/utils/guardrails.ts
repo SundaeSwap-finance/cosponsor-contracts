@@ -51,8 +51,7 @@ export const GUARDRAILS_FEE_PAD = 100_000n;
 
 /** True when the ledger will demand the guardrails witness for this action. */
 export const actionNeedsGuardrails = (action: { kind: string }): boolean =>
-  action.kind === "TreasuryWithdrawal" ||
-  action.kind === "ProtocolParameters";
+  action.kind === "TreasuryWithdrawal" || action.kind === "ProtocolParameters";
 
 /**
  * Resolve the reference-script UTxO carrying the guardrails script.
@@ -164,7 +163,11 @@ export const appendProposingRedeemer = (
     witnessSet.plutusData(),
     usedCostModels,
   );
-  if (!check || !currentSdh || String(check.scriptDataHash) !== String(currentSdh)) {
+  if (
+    !check ||
+    !currentSdh ||
+    String(check.scriptDataHash) !== String(currentSdh)
+  ) {
     throw new Error(
       "appendProposingRedeemer: pre-patch script_data_hash mismatch " +
         `(recomputed ${check?.scriptDataHash}, body ${currentSdh}) — ` +

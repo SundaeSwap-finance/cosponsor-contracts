@@ -379,7 +379,8 @@ export const canonicalizeBodyInputSets = (bodyHex: string): string => {
     const valueStart = cursor;
     cursor = skipCborItem(bodyHex, cursor);
     const valueHex = bodyHex.slice(valueStart, cursor);
-    out += keyHex + (key === 0 || key === 18 ? sortInputSetHex(valueHex) : valueHex);
+    out +=
+      keyHex + (key === 0 || key === 18 ? sortInputSetHex(valueHex) : valueHex);
   }
   return out;
 };

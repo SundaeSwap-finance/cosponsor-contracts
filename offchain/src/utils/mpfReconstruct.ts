@@ -119,8 +119,9 @@ const keyFromProposeInputs = (
     if (!input.inlineDatumHex) continue;
     let field0: Core.PlutusData;
     try {
-      const constr = Core.PlutusData.fromCbor(HexBlob(input.inlineDatumHex))
-        .asConstrPlutusData();
+      const constr = Core.PlutusData.fromCbor(
+        HexBlob(input.inlineDatumHex),
+      ).asConstrPlutusData();
       if (!constr || constr.getAlternative() !== 0n) continue; // not Before
       field0 = constr.getData().get(0);
     } catch {

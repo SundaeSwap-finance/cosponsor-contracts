@@ -232,9 +232,7 @@ export const sortedParamEntries = (
   );
   for (let i = 1; i < sorted.length; i++) {
     if (sorted[i][0] === sorted[i - 1][0]) {
-      throw new Error(
-        `sortedParamEntries: duplicate param id ${sorted[i][0]}`,
-      );
+      throw new Error(`sortedParamEntries: duplicate param id ${sorted[i][0]}`);
     }
   }
   return sorted;
@@ -447,7 +445,8 @@ export const fromContractType = (
     return {
       kind: "ProtocolParameters",
       ancestor: contractAncestorToUi(pp.ancestor),
-      newParameters: entries.length > 0 ? sortedParamEntries(entries) : undefined,
+      newParameters:
+        entries.length > 0 ? sortedParamEntries(entries) : undefined,
       guardRails: pp.guardrails,
     };
   }
@@ -945,10 +944,7 @@ export const buildProtocolParametersAsPlutusData = (
   // ledger presents to the script context; guardrails relies on it).
   const updateMap = new PlutusMap();
   for (const [id, value] of sortedParamEntries(pp.newParameters)) {
-    updateMap.insert(
-      PlutusData.newInteger(id),
-      paramValueToPlutusData(value),
-    );
+    updateMap.insert(PlutusData.newInteger(id), paramValueToPlutusData(value));
   }
   const updateData = PlutusData.newMap(updateMap);
 

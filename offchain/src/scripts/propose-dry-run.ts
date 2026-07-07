@@ -118,7 +118,9 @@ const main = async () => {
         // burns the whole gov deposit (learned the hard way: 454d1c79…).
         const action = cosponsoredProposal.action as {
           kind: string;
-          ancestor?: import("@validators/Types/GovernanceAction").IGovernanceActionId | null;
+          ancestor?:
+            | import("@validators/Types/GovernanceAction").IGovernanceActionId
+            | null;
         };
         await assertAncestorCurrent(action.kind, action.ancestor);
         console.log(

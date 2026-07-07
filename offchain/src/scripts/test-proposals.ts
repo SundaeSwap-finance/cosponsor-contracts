@@ -166,7 +166,9 @@ export const SUBMIT_INFO: ICosponsoredProposal = {
     // static file (cosponsor-ui/static/proposals/info-action.jsonld), VERIFIED
     // live: GET returns 200 application/ld+json, bytes hash to df37068a. hash =
     // blake2b-256 of that file; changing the domain/path changes the gADA.
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/info-action.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/info-action.jsonld",
+    ),
     hash: "df37068aa4185c0d53249bda992a43bf04d4c0883205a292898d9f59fc9580e7",
   },
   action: { kind: "NicePoll" },
@@ -179,7 +181,9 @@ export const SUBMIT_INFO: ICosponsoredProposal = {
 export const SUBMIT_NO_CONFIDENCE: ICosponsoredProposal = {
   deposit: GOV_ACTION_DEPOSIT,
   anchor: {
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/no-confidence.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/no-confidence.jsonld",
+    ),
     hash: "051b12f69528a2271ddc4697cf05f8782bb67f7d16714d2320ec60ce95e594ea",
   },
   action: { kind: "NoConfidence", ancestor: PLACEHOLDER_ANCESTOR_COMMITTEE },
@@ -193,7 +197,9 @@ export const SUBMIT_NO_CONFIDENCE: ICosponsoredProposal = {
 export const SUBMIT_TREASURY_WITHDRAWAL: ICosponsoredProposal = {
   deposit: GOV_ACTION_DEPOSIT,
   anchor: {
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/treasury-withdrawal.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/treasury-withdrawal.jsonld",
+    ),
     hash: "b37fdc18554dc4e8e306b12bb196265d3cd424fc9b2b119c87e61e2c2a4a0013",
   },
   action: {
@@ -210,7 +216,9 @@ export const SUBMIT_TREASURY_WITHDRAWAL: ICosponsoredProposal = {
 export const SUBMIT_HARDFORK: ICosponsoredProposal = {
   deposit: GOV_ACTION_DEPOSIT,
   anchor: {
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/hard-fork.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/hard-fork.jsonld",
+    ),
     hash: "9ae7d84db82a8a140f0d7cd15c05f8024586e29d199517a49e47fdeb2d86ad99",
   },
   action: {
@@ -227,7 +235,9 @@ export const SUBMIT_HARDFORK: ICosponsoredProposal = {
 export const SUBMIT_COMMITTEE: ICosponsoredProposal = {
   deposit: GOV_ACTION_DEPOSIT,
   anchor: {
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/constitutional-committee.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/constitutional-committee.jsonld",
+    ),
     hash: "5a982f93a6d1e8cfd619964022e17e05bc164eafe57de9806fb5e5f81bd37996",
   },
   action: {
@@ -235,7 +245,10 @@ export const SUBMIT_COMMITTEE: ICosponsoredProposal = {
     ancestor: PLACEHOLDER_ANCESTOR_COMMITTEE,
     membersToRemove: [],
     membersToAdd: [
-      [PLACEHOLDER_COMMITTEE_MEMBER_TO_ADD, PLACEHOLDER_COMMITTEE_MANDATE_EPOCH],
+      [
+        PLACEHOLDER_COMMITTEE_MEMBER_TO_ADD,
+        PLACEHOLDER_COMMITTEE_MANDATE_EPOCH,
+      ],
     ],
     quorum: PLACEHOLDER_COMMITTEE_QUORUM,
   },
@@ -254,7 +267,9 @@ export const SUBMIT_COMMITTEE: ICosponsoredProposal = {
 export const SUBMIT_NEW_CONSTITUTION: ICosponsoredProposal = {
   deposit: GOV_ACTION_DEPOSIT,
   anchor: {
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/new-constitution.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/new-constitution.jsonld",
+    ),
     // Updated 2026-07-06: metadata now declares the constitution document in
     // its references (the constitutionAnchor convention).
     hash: "2ccb4c0504f63588d77ef4fb2175ecf85a2ff39df11ce5e97f8d46b079dd40cf",
@@ -284,7 +299,9 @@ export const SUBMIT_NEW_CONSTITUTION: ICosponsoredProposal = {
 export const SUBMIT_PROTOCOL_PARAMS: ICosponsoredProposal = {
   deposit: GOV_ACTION_DEPOSIT,
   anchor: {
-    url: hexUrl("https://cosponsor.preview.sundae.fi/proposals/protocol-parameters.jsonld"),
+    url: hexUrl(
+      "https://cosponsor.preview.sundae.fi/proposals/protocol-parameters.jsonld",
+    ),
     hash: "5cf73c70390e3e7dee487798785bbe4408dfd9e2ed8c8fab8d7abfd17d27b758",
   },
   action: {

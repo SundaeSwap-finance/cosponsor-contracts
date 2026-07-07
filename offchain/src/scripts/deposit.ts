@@ -88,7 +88,9 @@ const main = async () => {
     // shared with propose-dry-run.ts, using its own `deposit` as the amount so
     // the pooled Before UTxO hashes to the same gADA token the propose expects.
     const testProposal = selectTestProposal();
-    const depositAmount = testProposal ? testProposal.deposit : BigInt(DEPOSIT_AMOUNT);
+    const depositAmount = testProposal
+      ? testProposal.deposit
+      : BigInt(DEPOSIT_AMOUNT);
 
     console.log(`Deposit amount: ${depositAmount} lovelace`);
     if (testProposal) {
@@ -104,7 +106,11 @@ const main = async () => {
     }
 
     // Submit deposit transaction
-    await submitDepositTransaction(cardanoProvider, depositAmount, testProposal);
+    await submitDepositTransaction(
+      cardanoProvider,
+      depositAmount,
+      testProposal,
+    );
   } catch (error) {
     console.error("Deposit script failed:", error);
     process.exit(1);

@@ -681,19 +681,22 @@ export const proposeWithScriptContext = async <
   }
 
   // ── 9. Splice proposal_procedures (field 20) and rebuild the tx ────────
-  const proposalProceduresHex = encodeProposalProcedures([
-    {
-      proposal: {
-        ...cosponsoredProposal,
-        anchor: {
-          url: anchorUrlText,
-          hash: cosponsoredProposal.anchor.hash,
+  const proposalProceduresHex = encodeProposalProcedures(
+    [
+      {
+        proposal: {
+          ...cosponsoredProposal,
+          anchor: {
+            url: anchorUrlText,
+            hash: cosponsoredProposal.anchor.hash,
+          },
         },
+        returnAddress: { ScriptCredential: [ctx.cosponsorHash] as [string] },
       },
-      returnAddress: { ScriptCredential: [ctx.cosponsorHash] as [string] },
-    },
-    // Network nibble for the reward-account bytes (testnet 0 / mainnet 1).
-  ], Number(network));
+      // Network nibble for the reward-account bytes (testnet 0 / mainnet 1).
+    ],
+    Number(network),
+  );
   const splicedBodyHex = spliceProposalProcedures(
     bodyHex,
     proposalProceduresHex,
